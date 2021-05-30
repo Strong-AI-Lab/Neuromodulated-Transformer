@@ -47,9 +47,9 @@ class ExternalMemory(tf.keras.layers.Layer):
         Description: Override original call function and return x with added information from memory via
             word and sentence attention.
         Inputs:
-            x: (torch.Tensor; (batch, seq_len, d_model)) Output from a transformer layer.
+            x: (tf.Tensor; (batch, seq_len, d_model)) Output from a transformer layer.
         Return:
-            output: (torch.Tensor ;(batch, seq_len|ncol, w_dim))
+            output: (tf.Tensor ;(batch, seq_len|ncol, w_dim))
         '''
         #batch_attn_masks = []
         mask = tf.Variable(tf.zeros((x.shape[0], self.nrow, self.ncol))) # (batch, nrow, ncol)
@@ -106,11 +106,6 @@ class MatrixMemory(tf.keras.layers.Layer):
         self.nrow = nrow
         self.ncol = ncol
         self.word_dim = word_dim
-
-        #mem_list = []
-        #for row in range(self.nrow):
-
-         #   mem_list.append(tf.zeros([1, self.ncol, self.word_dim]))
 
         self.weight_matrix = tf.Variable(tf.zeros((self.nrow, self.ncol, self.word_dim), dtype=tf.float32))
         self.max_counter = 0
@@ -220,7 +215,15 @@ class HierarchicalAttention(tf.keras.layers.Layer):
                                                          #return_state=True) # Do I need the hidden states?
 
             self.bdir_recurrent = tf.keras.layers.Bidirectional(recurrent)
-        #TODO: Implement LSTM version.
+        elif self.recurrent_model == "GRU":
+            recurrent = tf.keras.layers.LSTM(self.recurrent_dim,
+                                            return_sequences=True)
+                                                         #return_state=True) # Do I need the hidden states?
+
+            self.bdir_recurrent = tf.keras.layers.Bidirectional(recurrent)
+
+        assert self.bdir_recurrent is not None, "Error when initializing bidirectinal recurrent model. "
+
 
         self.wx = tf.keras.layers.Dense(self.word_dim)
         self.wc = tf.keras.layers.Dense(1) # input will be of dimension ncol.
@@ -238,6 +241,7 @@ class HierarchicalAttention(tf.keras.layers.Layer):
         Return:
             attn: (tf.Tensor; batch, ncol|n) Returns attention scores for current sentence/segement.
         '''
+        #TODO: Add dropout layers.
         x = self.wx(x) # (batch, ncol, word_dim)
         c_ = self.wc(tf.transpose(c, perm=[1,0])) # (word_dim, 1)
 
@@ -251,13 +255,14 @@ class HierarchicalAttention(tf.keras.layers.Layer):
         Description: Calculates the attention score for each sentence and returns it.
             Notice that this is done one batch at a time in this implementation.
         Input:
-            c: (torch.Tensor; (nrow, ncol, word_dim))
+            c: (tf.Tensor; (nrow, ncol, word_dim))
                 Attention adjusted memory for a given batch (each batch will have a different score).
                 Note: This is done one batch at a time.
         Return:
-            alpha: (torch.Tensor; (nrow))
+            alpha: (tf.Tensor; (nrow))
                 The attention scores for a single batch are returned.
         '''
+        #TODO: Add dropout layers.
         if self.recurrent_model == "GRU":
             seq_output = self.bdir_recurrent(c) # (nrow, ncol, rec_dim*2)
 

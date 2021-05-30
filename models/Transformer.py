@@ -1,3 +1,6 @@
+import sys
+sys.path.append("..")
+
 import collections
 import logging
 import os
@@ -14,14 +17,41 @@ import tensorflow_datasets as tfds
 import tensorflow_text as text
 import tensorflow as tf
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"#"0,1,2,3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4" #"0,1,2,3"
+
+'''
+This file is based on the following tutorial with modifications. 
+
+https://www.tensorflow.org/tutorials/text/transformer
+'''
+
+
+def get_angles(pos, i, d_model):
+    angle_rates = 1 / np.power(10000, (2 * (i // 2)) / np.float32(d_model))
+    return pos * angle_rates
+
+
+def positional_encoding(position, d_model):
+    angle_rads = get_angles(np.arange(position)[:, np.newaxis],
+                                 np.arange(d_model)[np.newaxis, :],
+                                 d_model)
+
+    # apply sin to even indices in the array; 2i
+    angle_rads[:, 0::2] = np.sin(angle_rads[:, 0::2])
+
+    # apply cos to odd indices in the array; 2i+1
+    angle_rads[:, 1::2] = np.cos(angle_rads[:, 1::2])
+
+    pos_encoding = angle_rads[np.newaxis, ...]
+
+    return tf.cast(pos_encoding, dtype=tf.float32)
 
 class MultiHeadAttention(tf.keras.layers.Layer):
     '''
     Class: MultiHeadAttention
-    Purpose: Implementation of multi-head attention to be used in a Transformer.
+    Description: Implementation of multi-head attention to be used in by the Transformer class.
     Inputs:
-        d_model: (int) The dimension  of the model.
+        d_model: (int) The dattn_weights_block1imension  of the model.
         num_heads: (int) The number of heads in the Multi head attention layer.
     '''
     def __init__(self, d_model, num_heads):
@@ -33,6 +63,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         # Must be a multiple of the number of heads.
         assert d_model % self.num_heads == 0
 
+        # the dimension of each individual head.
         self.depth = d_model // self.num_heads
 
         self.wq = tf.keras.layers.Dense(d_model)
@@ -44,13 +75,15 @@ class MultiHeadAttention(tf.keras.layers.Layer):
     def split_heads(self, x, batch_size):
         '''
         Function: split_heads
-        Purpose: To split the last dimension into (num_heads, depth).
+        Description: Splits the last dimension into (num_heads, depth).
             Then transpose the tensor to the following permutation, [0,2,1,3].
         Input:
-            x: (tf.Tensor).
+            x: (tf.Tensor: [batch_size, enc_seq_len, d_model]) Input tensor.
             batch_size: (int) Batch size during training.
         Return:
+            (tf.tensor; [batch_size, num_heads, enc_seq_len, depth])
         '''
+        # num_heads * depth = d_model
         x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
         return tf.transpose(x, perm=[0,2,1,3])
 
@@ -59,11 +92,18 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         Function: call
         Purpose: Code to be executed when the keras layer class is called.
         Input:
-            v:
-            k:
-            q:
-            mask:
+            v: (tf.Tensor; [batch, seq_len, word_dim|d_model]) Value input tensor.
+            k: (tf.Tensor; [batch, seq_len, word_dim|d_model]) Key input tensor.
+            q: (tf.Tensor; [batch, seq_len, word_dim|d_model]) Query input tensor.
+            mask: (tf.Tensor; [batch_size, ..., ..., seq_len]) Mask to apply to the attention matrix.
+                Note: ... means that the exact dimension size can vary from encoder to decoder.
+                Encoder: (batch_size, 1, 1, seq_len)
+                Decoder 1st block: (batch_size, 1, seq_len, seq_len)
+                Decoder 2nd block: (batch_size, 1, 1, seq_len)
+                Python broadcasting allows this to work as intended.
         Return:
+            output: (tf.Tensor; [batch, seq_len_q, d_model])
+            attention_weights: (tf.Tensor; [batch_size, num_heads, seq_len_q, seq_len_k])
         '''
         batch_size = tf.shape(q)[0]
 
@@ -94,11 +134,18 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         Purpose: Perform scaled dot-product attention with a query, key, value and a mask as input.
             Specifically calculate the attention weights and multiply them with the value, v.
         Input:
-            q:
-            k:
-            v:
-            mask: (must be broadcastable)
+            q: (tf.Tensor; [batch_size, num_heads, seq_len_q, depth])
+            k: (tf.Tensor; [batch_size, num_heads, seq_len_k, depth])
+            v: (tf.Tensor; [batch_size, num_heads, seq_len_v, depth])
+            mask: (tf.Tensor; [batch_size, ..., ..., seq_len]) Mask to apply to the attention matrix.
+                Note: ... means that the exact dimension size can vary from encoder to decoder.
+                Encoder: (batch_size, 1, 1, seq_len)
+                Decoder 1st block: (batch_size, 1, seq_len, seq_len)
+                Decoder 2nd block: (batch_size, 1, 1, seq_len)
+                Python broadcasting allows this to work as intended.
         Return:
+            output: (tf.Tensor; [batch_size, num_heads, seq_len_q, depth_v])
+            attention_weights: (tf.Tensor; [batch_size, num_heads, seq_len_q, seq_len_k])
         '''
 
         matmul_qk = tf.matmul(q, k, transpose_b = True) # (..., seq_len_q, seq_len_k)
@@ -112,7 +159,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
             scaled_attention_logits += (mask * -1e9)
 
         # softmax is normalized on the last axis (seq_len_k) so the scores add to 1.
-        # Technically you could do the other axis as long as it is consistent throough training.
+        # Technically you could do the other axis as long as it is consistent through out training.
         attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
 
         output = tf.matmul(attention_weights, v) # (..., seq_len_q, depth_v)
@@ -130,14 +177,13 @@ class PWFeedForwardNetwork(tf.keras.layers.Layer):
 
         TODO. num_ffn: (int) The number of feed forward layers to run in parallel.
     '''
-    def __init__(self, d_model, dff, num_ffn=1):
+    def __init__(self, d_model, dff):
         super(PWFeedForwardNetwork, self).__init__()
 
         self.d_model = d_model
         self.dff = dff
 
         # TODO: later incorporate this many feed forward layers.
-        self.num_ffn = num_ffn
 
         # TODO: possibly put all into a list and loop over to create them.
         self.ffnetwork1 = tf.keras.Sequential([
@@ -150,7 +196,9 @@ class PWFeedForwardNetwork(tf.keras.layers.Layer):
         Function: call
         Purpose: Runs the point-wise feed forward network with the given input.
         Input:
-            input: (tf.Tensor) -- later put dimensions here. (batch_size, seq_len, d_model)
+            input: (tf.Tensor; [batch_size, seq_len, d_model])
+        Return:
+            output: (tf.Tensor; [batch_size, seq_len, d_model])
         '''
         # TODO: add support for multiple feed forward layers in parallel.
         output = self.ffnetwork1(input)
@@ -164,14 +212,13 @@ class EncoderLayer(tf.keras.layers.Layer):
         d_model: (int) Transformer model dimension.
         num_heads: (int) Number of multi-head attention heads.
         dff: (int) Dimension of the feed forward network.
-        num_ffn: (int) Number of feed forward networks to run in parallel in an encoder layer.
         rate: (float) The dropout rate for the keras dropout layers.
     '''
-    def __init__(self, d_model, num_heads, dff, num_ffn=1, rate=0.1):
+    def __init__(self, d_model, num_heads, dff, rate=0.1):
         super(EncoderLayer, self).__init__()
 
         self.mha = MultiHeadAttention(d_model, num_heads)
-        self.ffn = PWFeedForwardNetwork(d_model, dff, num_ffn)
+        self.ffn = PWFeedForwardNetwork(d_model, dff)
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6) # for multi-head attention layer.
         self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6) # for feed forward network.
@@ -184,9 +231,16 @@ class EncoderLayer(tf.keras.layers.Layer):
         Function: call
         Description: When called it runs a single encoder layer.
         Input:
-            x:
+            x: (tf.Tensor; [batch, input_seq_len, d_model]) Input to the encoder layer.
             training: (boolean) Determines if we are in the training phase or evaluation (testing) phase.
-            mask:
+            mask: (tf.Tensor; [batch_size, ..., ..., seq_len]) Mask to apply to the attention matrix.
+                Note: ... means that the exact dimension size can vary from encoder to decoder.
+                Encoder: (batch_size, 1, 1, seq_len)
+                Decoder 1st block: (batch_size, 1, seq_len, seq_len)
+                Decoder 2nd block: (batch_size, 1, 1, seq_len)
+                Python broadcasting allows this to work as intended..
+        Return:
+            out2: (tf.Tensor; [batch_size, input_seq_len, d_model])
         '''
 
         attn_output, _ = self.mha(x, x, x, mask) # (batch_size, input_seq_len, d_model)
@@ -229,11 +283,15 @@ class DecoderLayer(tf.keras.layers.Layer):
         Function: call
         Description: Implementation of a single decoder layer.
         Input:
-            x:
-            enc_output:
-            training: (boolean)
-            look_ahead_mask:
-            padding_mask:
+            x: (tf.Tensor; [batch, tar_seq_len, d_model]) Input to the decoder layer.
+            enc_output: (tf.Tensor; [batch, input_seq_len, d_model]) The output from the encoder (after all N layers).
+            training: (boolean) Determines if we are in the training phase or evaluation (testing) phase.
+            look_ahead_mask: (tf.Tensor; [batch, 1, seq_len, seq_len]) Mask that masks out future words.
+            padding_mask: (tf.Tensor; [batch, 1, 1, seq_len]) Padding mask for the decoder.
+        Return:
+            out3: (tf.Tensor; [batch, target_seq_len, d_model])
+            attn_weights_block1: (batch_size, num_heads, tar_seq_len_q, tar_seq_len_k)
+            attn_weights_block2: (batch_size, num_heads, tar_seq_len_q, tar_seq_len_k)
         '''
         #enc_output.shape == (batch_size, input_seq_len, d_model)
 
@@ -257,13 +315,13 @@ class Encoder(tf.keras.layers.Layer):
     Class: Encoder
     Description: Implementaion of N stacked Encoder layers.
     Input:
-        num_layers:
-        d_model:
-        num_heads:
-        dff:
-        input_vocab_size:
-        maximum_pposition_encoding:
-        rate: (float)
+        num_layers: (int) The number of encoder layers.
+        d_model: (int) The dimension of the model.
+        num_heads: (int) The number of heads for MultiHeadAttntion.
+        dff: (int) Pointwise feedforward network's dimension.
+        input_vocab_size: (int) Vocabulary size of the input.
+        maximum_position_encoding: (int) Parameter for positional encoder.
+        rate: (float) Dropout rate (probability) for dropout layers during training.
     '''
     def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size,
                  maximum_position_encoding, rate=0.1):
@@ -272,8 +330,10 @@ class Encoder(tf.keras.layers.Layer):
         self.d_model = d_model
         self.num_layers = num_layers
 
+        #TODO: Note to self. consider changing the embedding to an Encoder instead and
+        # modify it so that it can add unseen tokens to its repetoir.
         self.embedding = tf.keras.layers.Embedding(input_vocab_size, d_model)
-        self.pos_encoding = self.positional_encoding(maximum_position_encoding, self.d_model)
+        self.pos_encoding = positional_encoding(maximum_position_encoding, self.d_model)
 
         # Do below for self_attention layer.
         self.enc_layers = [EncoderLayer(d_model, num_heads, dff, rate) for _ in range(num_layers)]
@@ -282,7 +342,16 @@ class Encoder(tf.keras.layers.Layer):
 
     def call(self, x, training, mask):
         '''
-        pass
+        Function: call
+        Description: A pass through all of the encoder layers.
+        Input:
+            x: (tf.Tensor; [batch, inp_seq_len])
+            training: (boolean) True the model is training; False otherwise.
+            mask: (tf.Tensor; [batch_size, ..., ..., seq_len]) Mask to apply to the attention matrix.
+                Note: ... means that the exact dimension size can vary from encoder to decoder.
+                Encoder: (batch_size, 1, 1, seq_len)
+        Return:
+            x: (tf.Tensor; [batch_size, inp_seq_len, d_model])
         '''
 
         seq_len = tf.shape(x)[1]
@@ -304,28 +373,19 @@ class Encoder(tf.keras.layers.Layer):
 
         return x # (batch_size, input_seq_len, d_model)
 
-    def get_angles(self, pos, i, d_model):
-        angle_rates = 1 / np.power(10000, (2 * (i // 2)) / np.float32(d_model))
-        return pos * angle_rates
-
-    def positional_encoding(self, position, d_model):
-        angle_rads = self.get_angles(np.arange(position)[:, np.newaxis],
-                                np.arange(d_model)[np.newaxis, :],
-                                d_model)
-
-        # apply sin to even indices in the array; 2i
-        angle_rads[:, 0::2] = np.sin(angle_rads[:, 0::2])
-
-        # apply cos to odd indices in the array; 2i+1
-        angle_rads[:, 1::2] = np.cos(angle_rads[:, 1::2])
-
-        pos_encoding = angle_rads[np.newaxis, ...]
-
-        return tf.cast(pos_encoding, dtype=tf.float32)
 
 class Decoder(tf.keras.layers.Layer):
     '''
-    pass
+    Class: Decoder
+    Description: Implementation of the decoder in the transformer architecture.
+    Input:
+        num_layers: (int) The number of decoder layers.
+        d_model: (int) The dimension of the model (specifically, in multi-head attention).
+        num_heads: (int) The number of heads in the multi-head attention layer.
+        dff: (int) The dimension of the point-wise feed forward network.
+        target_vocab_size: (int) The target vocabulary size.
+        maximum_position_encoding: (int) Parameter for positional encoder.
+        rate: (float) Dropout rate (probability) for dropout layers during training.
     '''
     def __init__(self, num_layers, d_model, num_heads, dff, target_vocab_size,
                  maximum_position_encoding, rate=0.1):
@@ -335,14 +395,24 @@ class Decoder(tf.keras.layers.Layer):
         self.num_layers = num_layers
 
         self.embedding = tf.keras.layers.Embedding(target_vocab_size, d_model)
-        self.pos_encoding = self.positional_encoding(maximum_position_encoding, d_model)
+        self.pos_encoding = positional_encoding(maximum_position_encoding, d_model)
 
         self.dec_layers = [DecoderLayer(d_model, num_heads, dff, rate) for _ in range(num_layers)]
         self.dropout = tf.keras.layers.Dropout(rate)
 
     def call(self, x, enc_output, training, look_ahead_mask, padding_mask):
         '''
-        pass
+        Function: call
+        Description: A pass through all of the decoder layers.
+        Input:
+            x: (tf.Tensor; [batch, inp_seq_len])
+            enc_output: (tf.Tensor; [batch_size, inp_seq_len, d_model])
+            training: (boolean) True the model is training; False otherwise.
+            look_ahead_mask: (tf.Tensor; [batch, 1, seq_len, seq_len]) Mask that masks out future words.
+            padding_mask: (tf.Tensor; [batch, 1, 1, seq_len]) Padding mask for the decoder.
+        Return:
+            x: (tf.Tensor; [batch_size, tar_seq_len, d_model])
+            attention_weights: (Dict) Dictionary of the attention weights for each decoder layer and block.
         '''
         seq_len = tf.shape(x)[1]
         attention_weights = {}
@@ -363,29 +433,21 @@ class Decoder(tf.keras.layers.Layer):
         # x.shape == (batch_size, target_seq_len, d_model)
         return x, attention_weights
 
-    def get_angles(self, pos, i, d_model):
-        angle_rates = 1 / np.power(10000, (2 * (i // 2)) / np.float32(d_model))
-        return pos * angle_rates
-
-    def positional_encoding(self, position, d_model):
-        angle_rads = self.get_angles(np.arange(position)[:, np.newaxis],
-                                np.arange(d_model)[np.newaxis, :],
-                                d_model)
-
-        # apply sin to even indices in the array; 2i
-        angle_rads[:, 0::2] = np.sin(angle_rads[:, 0::2])
-
-        # apply cos to odd indices in the array; 2i+1
-        angle_rads[:, 1::2] = np.cos(angle_rads[:, 1::2])
-
-        pos_encoding = angle_rads[np.newaxis, ...]
-
-        return tf.cast(pos_encoding, dtype=tf.float32)
-
 
 class Transformer(tf.keras.Model):
     '''
-    pass
+    Class: Transformer
+    Description: Implementation of the transformer model.
+    Input:
+        num_layers: (int) The number of decoder layers.
+        d_model: (int) The dimension of the model (specifically, in multi-head attention).
+        num_heads: (int) The number of heads in the multi-head attention layer.
+        dff: (int) The dimension of the point-wise feed forward network.
+        input_vocab_size: (int) Vocabulary size of the input.
+        target_vocab_size: (int) The target vocabulary size.
+        pe_input: (int) Parameter for positional encoder for the encoder layer.
+        pe_target: (int) Parameter for positional encoder for the decoder layer.
+        rate: (float) Dropout rate (probability) for dropout layers during training.
     '''
     def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size,
                  target_vocab_size, pe_input, pe_target, rate=0.1):
@@ -401,9 +463,19 @@ class Transformer(tf.keras.Model):
 
     def call(self, inp, tar, training, enc_padding_mask, look_ahead_mask, dec_padding_mask):
         '''
-        pass.
+        Function: call
+        Description: One pass through the Transformer for a batch.
+        Input:
+            inp: (tf.Tensor; [batch_size, inp_seq_len])
+            tar: (tf.Tensor; [batch_size, tar_seq_len])
+            training: (boolean) True the model is training; False otherwise.
+            enc_padding_mask: (tf.Tensor; [batch, 1, 1, seq_len]) Padding mask for the encoder.
+            look_ahead_mask: (tf.Tensor; [batch, 1, seq_len, seq_len]) Mask that masks out future words (1st block).
+            dec_padding_mask: (tf.Tensor; [batch, 1, 1, seq_len]) Padding mask for the decoder (2nd block).
+        Return:
+            final_output: (tf.Tensor; [batch_size, tar_seq_len, tar_vocab_size])
+            attention_weights: (Dict) Dictionary of the attention weights for each decoder layer and block.
         '''
-
         enc_output = self.tokenizer(inp, training, enc_padding_mask) # (batch_size, inp_seq_len, d_model)
 
         #dec_output.shape == (batch_size, tar_seq_len, d_model)
@@ -414,102 +486,5 @@ class Transformer(tf.keras.Model):
         return final_output, attention_weights
 
 
-def create_check_point_objects(path, transformer, optimizer):
-    pass
-
 if __name__ == '__main__':
-
-    #print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
-    #print(tf.test.gpu_device_name())
-
-    # Note: Make Unit tests for these later.
-
-    '''
-    # Test Multi-head Attention.
-    temp_mha = MultiHeadAttention(d_model=512, num_heads=8)
-    y = tf.random.uniform((1, 60, 512))  # (batch_size, encoder_sequence, d_model)
-    out, attn = temp_mha(y, k=y, q=y, mask=None)
-    print(out.shape, attn.shape)
-    '''
-
-    '''
-    # Test Encoder layer.
-    sample_encoder_layer = EncoderLayer(512, 8, 2048)
-    z = tf.random.uniform((64, 43, 512))
-    sample_encoder_layer_output = sample_encoder_layer(
-        z, False, None)
-    print("Input", z)
-    print("Output", sample_encoder_layer_output)
-    print("Output shape:", sample_encoder_layer_output.shape)  # (batch_size, input_seq_len, d_model)
-    '''
-
-    '''
-    # Decoder Layer test.
-    sample_decoder_layer = DecoderLayer(512, 8, 2048)
-
-    # Encoder output is needed here.
-    sample_encoder_layer = EncoderLayer(512, 8, 2048)
-    z = tf.random.uniform((64, 43, 512))
-    sample_encoder_layer_output = sample_encoder_layer(
-        z, False, None)
-
-    sample_decoder_layer_output, _, _ = sample_decoder_layer(
-        tf.random.uniform((64, 50, 512)), sample_encoder_layer_output,
-        False, None, None)
-
-    print("Output dimension", sample_decoder_layer_output.shape)  # (batch_size, target_seq_len, d_model)
-    '''
-
-    '''
-    # Full encoder layer (n layers)
-    sample_encoder = Encoder(num_layers=2, d_model=512, num_heads=8,
-                             dff=2048, input_vocab_size=8500,
-                             maximum_position_encoding=10000)
-    temp_input = tf.random.uniform((64, 62), dtype=tf.int64, minval=0, maxval=200)
-
-    sample_encoder_output = sample_encoder(temp_input, training=False, mask=None)
-
-    print(sample_encoder_output.shape)  # (batch_size, input_seq_len, d_model)
-    '''
-
-    '''
-    # Decoder Test
-    sample_decoder = Decoder(num_layers=2, d_model=512, num_heads=8,
-                             dff=2048, target_vocab_size=8000,
-                             maximum_position_encoding=5000)
-
-    sample_encoder = Encoder(num_layers=2, d_model=512, num_heads=8,
-                             dff=2048, input_vocab_size=8500,
-                             maximum_position_encoding=10000)
-    temp_input = tf.random.uniform((64, 62), dtype=tf.int64, minval=0, maxval=200)
-
-    sample_encoder_output = sample_encoder(temp_input, training=False, mask=None)
-
-    temp_input = tf.random.uniform((64, 26), dtype=tf.int64, minval=0, maxval=200)
-
-    output, attn = sample_decoder(temp_input,
-                                  enc_output=sample_encoder_output,
-                                  training=False,
-                                  look_ahead_mask=None,
-                                  padding_mask=None)
-
-    print(output.shape, attn['decoder_layer2_block2'].shape)
-    '''
-
-    '''
-    # Testing the entire transformer.
-    sample_transformer = Transformer(
-        num_layers=2, d_model=512, num_heads=8, dff=2048,
-        input_vocab_size=8500, target_vocab_size=8000,
-        pe_input=10000, pe_target=6000)
-
-    temp_input = tf.random.uniform((64, 38), dtype=tf.int64, minval=0, maxval=200)
-    temp_target = tf.random.uniform((64, 36), dtype=tf.int64, minval=0, maxval=200)
-
-    fn_out, _ = sample_transformer(temp_input, temp_target, training=False,
-                                   enc_padding_mask=None,
-                                   look_ahead_mask=None,
-                                   dec_padding_mask=None)
-
-    print(fn_out.shape)  # (batch_size, tar_seq_len, target_vocab_size)
-    '''
+    pass

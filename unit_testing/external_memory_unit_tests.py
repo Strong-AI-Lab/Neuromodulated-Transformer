@@ -11,16 +11,12 @@ from models.External_memory import *
 
 class TestExternalMemory(unittest.TestCase):
     '''
-    Class: TestTransformerShapes
-    Description: Class that performs unit tests on each Transformer layer. Each test involves
-        testing if the shape of the output of each module matches what is expected.
-
-    https://www.tensorflow.org/tutorials/text/transformer is where the test cases/code is taken from.
+    Class: TestExternalMemory
+    Description: Class that performs unit tests on each class innvolved in the ExternalMemory computation.
     '''
     def test_ExternalMemoryInitialization(self):
         ememory = ExternalMemory(nrow=10, ncol=20, col_dim=50, rec_dim=50, mem_type="Default",
                                  strategy="Hierarchical Attention", recurrent_model="GRU")
-        #self.assertEqual(item1, item2)
 
     def test_ExternalMemoryCall(self):
         batch, seq_len, dim, nrow, ncol = 16, 8, 100, 10, 8
@@ -112,9 +108,7 @@ class TestExternalMemory(unittest.TestCase):
 
         mmemory.add(x=x, strategy='default')
         mat1 = tf.concat([tf.ones([batch, ncol, dim]) * 3, tf.zeros([nrow - batch, ncol, dim])], axis=0)
-        # print("\nMat1", mat1.shape, "\n")
-        # print("\nMemmatrix", mmemory.weight_matrix.shape, "\n")
-        # print(tf.equal(mmemory.weight_matrix, mat1))
+
         self.assertTrue(tf.equal(mmemory.weight_matrix, mat1).numpy().all())
         self.assertTrue(mmemory.max_counter == batch)
         self.assertTrue(mmemory.counter == batch)
@@ -123,7 +117,7 @@ class TestExternalMemory(unittest.TestCase):
         mmemory.add(x=y, strategy='default')
         mat2 = tf.concat([tf.ones([12, ncol, dim]) * 2, tf.ones([4, ncol, dim]) * 3,
                           tf.ones([4, ncol, dim]) * 2], axis=0)
-        # print("\n", mmemory.weight_matrix[13,:,:], "\n")
+
         self.assertTrue(tf.equal(mmemory.weight_matrix, mat2).numpy().all())
         self.assertTrue(mmemory.max_counter == nrow)
         self.assertTrue(mmemory.counter == 12)
@@ -167,6 +161,7 @@ class TestExternalMemory(unittest.TestCase):
     def test_HierarchicalAttentionSentAttn(self):
         batch, seq_len, ncol, dim, nrow, rec_dim = 16, 8, 8, 100, 20, 120
 
+        # test recurrent_dim =/= dim (word_dim)
         mmemory = MatrixMemory(nrow=nrow, ncol=seq_len, word_dim=dim)
         hattn = HierarchicalAttention(nrow=nrow, ncol=ncol, word_dim=dim, recurrent_model='GRU', recurrent_dim=rec_dim) #recurrent_dim=112) error as reccurrent_dim has to equ
         x = tf.random.uniform((batch, seq_len, dim), dtype=tf.float32)
@@ -180,6 +175,7 @@ class TestExternalMemory(unittest.TestCase):
         # All elements should sum to one.
         self.assertTrue(tf.equal(tf.reduce_sum(attn_weights), tf.ones((1))).numpy().all())
 
+        # test recurrent_dim == dim (word_dim)
         hattn = HierarchicalAttention(nrow=nrow, ncol=ncol, word_dim=dim, recurrent_model='GRU',
                                       recurrent_dim=dim)  # recurrent_dim=112) error as reccurrent_dim has to equ
         x = tf.random.uniform((batch, seq_len, dim), dtype=tf.float32)
