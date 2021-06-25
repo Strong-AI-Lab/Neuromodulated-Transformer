@@ -4,8 +4,8 @@ First clone the repository:
   git clone https://github.com/Strong-AI-Lab/Neuromodulated-Transformer-with-External-Memory what-you-want-it-to-be-called-on-your-machine
 
 The following three files need to be downloaded and put in the folder `datasets'.
-  https://drive.google.com/file/d/1zDtp3MIR1oHSoI1v3MVJ9eHxooSshuyv/view?usp=drive_web
-  https://drive.google.com/file/d/17F-UzQHvPLoKkD36tzRW4mWhMs_YU86p/view?usp=drive_web
+  https://drive.google.com/file/d/1zDtp3MIR1oHSoI1v3MVJ9eHxooSshuyv/view?usp=drive_web \n
+  https://drive.google.com/file/d/17F-UzQHvPLoKkD36tzRW4mWhMs_YU86p/view?usp=drive_web \n
   https://drive.google.com/file/d/1oLCyxK3nP8wBGwwhUWDEmwXr0x86gGeV/view?usp=drive_web
 
 The file to execute training is called `train_nmdec_wikitext.py'
