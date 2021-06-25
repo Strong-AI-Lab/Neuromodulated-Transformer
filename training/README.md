@@ -22,7 +22,9 @@ Line 78: batch size of 4 is used, this results in crashing on server 1, hopefull
 
 Line 138: This is irrelevant as we are loading from already processed files.
 
-Line 141-143 require the folder above to be downlaoded and put into the datasets folder (or change the directory to where you put them on your machine.
+Line 141-143 require the files above to be downlaoded and put into the datasets folder (or change the directory to where you put them on your machine.
 
 Works/tested on tensorflow version 2.2.0 or later. 
 transformers 3.3.1 is the current version that is used and is known to work.
+
+Downloading as a zip file, changing gpu to train on and putting the downloaded files in the datasets folder worked for me.
