@@ -2,6 +2,7 @@ Step by Step guide to start training.
 
 First clone the repository:
   git clone https://github.com/Strong-AI-Lab/Neuromodulated-Transformer-with-External-Memory what-you-want-it-to-be-called-on-your-machine
+  Because it is a private repository at present downloading the whole project as a zip may be easier.
 
 The following three files need to be downloaded and put in the folder `datasets'.
   https://drive.google.com/file/d/1zDtp3MIR1oHSoI1v3MVJ9eHxooSshuyv/view?usp=drive_web
