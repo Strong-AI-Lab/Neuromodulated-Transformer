@@ -17,7 +17,7 @@ import tensorflow_datasets as tfds
 import tensorflow_text as text
 import tensorflow as tf
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "4" #"0,1,2,3"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "4" #"0,1,2,3"
 
 '''
 This file is based on the following tutorial with modifications. 

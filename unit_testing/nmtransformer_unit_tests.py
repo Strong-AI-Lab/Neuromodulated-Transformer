@@ -1,17 +1,53 @@
 import unittest
+import tensorflow as tf
 
 import sys
 sys.path.append("..")
 
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "4"
+#import os
+#os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,3,6"
 
-import logging
-logging.getLogger('tensorflow').setLevel(logging.ERROR)  # suppress warnings
+#import logging
+#logging.getLogger('tensorflow').setLevel(logging.ERROR)  # suppress warnings
 
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if len(gpus) >= 1:
+    tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=1000*48)])
 
-from models.Neuromodulation import *
+from models.Encoder import *
+from models.Decoder import *
+from models.miscellaneous import *
+from models.attention_masks import *
+from models.NMTransformer import *
+from transformers import TransfoXLTokenizer, XLNetTokenizer
+from training.train_nmdec_wikitext import nmdec_params
+from text_processing.create_tfxl_vocab import *
 
+def sample_dict_creation(max_seq_len):
+    # Sample initialization.
+    names = ["default", "attention_nm", "start_layer_nm"]
+    ffn1 = [2, [400, 'relu', False],
+            [100, 'none', False]]
+
+    ffn2 = [3, [400, 'relu', False],
+            [max_seq_len, 'none', True],
+            [max_seq_len, 'none', True]]
+
+    ffn3 = [3, [400, 'relu', False],
+            [max_seq_len, 'none', True],
+            [100, 'none', True]]
+
+    dct = create_ffn_dict(names, ffn1, ffn2, ffn3)
+    return dct
+
+def sample_dict_creation_dec():
+    # Sample initialization.
+    names = ["default"]
+    ffn1 = [2, [400, 'relu', False],
+            [100, 'none', False]]
+
+    dct = create_ffn_dict(names, ffn1)
+    return dct
 
 class TestTransformerShapes(unittest.TestCase):
     '''
@@ -698,6 +734,66 @@ class TestTransformerShapes(unittest.TestCase):
         self.assertEqual(len(default_layer.shape), 3)
         self.assertEqual(len(attention_nm_layer.shape), 3)
         self.assertEqual(len(start_layer_nm.shape), 3)
+
+    # tests decoder only with neuromodulation. Uses NMTransformerDec class.
+    def test_dec_only_nm(self):
+
+        batch_size = 8
+
+        # initialize tokenizer
+        tokenizer = get_tfxl_tokenizer()
+        target_vocab_size = len(tokenizer.get_vocab().keys())
+        nm_vocab_size = target_vocab_size
+
+        dec_ = tokenizer.encode("<dec>",
+                                add_special_tokens=False,
+                                pad_to_max_length=False,
+                                return_token_type_ids=False,
+                                return_attention_mask=False)[0]
+        lm_ = tokenizer.encode("<lm>",
+                               add_special_tokens=False,
+                               pad_to_max_length=False,
+                               return_token_type_ids=False,
+                               return_attention_mask=False)[0]
+
+        # initialize model hyperparameters.
+        nm_tf_dec_dict = nmdec_params(target_vocab_size, nm_vocab_size, num_aux_tokens=2)
+        _dict = nm_tf_dec_dict
+
+        transformer_lm = NMTransformerDec(_dict["num_layers"], _dict["d_model"], _dict["num_heads"], _dict["dff"],
+                                       _dict["ffn_dict_dec"], _dict["max_seq_len_dec"], _dict["target_vocab_size"],
+                                       _dict["pe_target"], rate_dec=_dict["rate_dec"],
+                                       nm_mha_dec=_dict["nm_mha_dec"],
+                                       enc_out=_dict["enc_out"], neuromodulation=_dict["neuromodulation"],
+                                       nm_net_vocab_size=_dict["nm_net_vocab_size"], pe_nm_net=_dict["pe_nm_net"],
+                                       rate_nm_enc=_dict["rate_nm_enc"], nm_mha_net=_dict["nm_mha_net"],
+                                       ffn_dict_nm=_dict["ffn_dict_nm"], max_seq_len_nm=_dict["max_seq_len_nm"])
+
+        #tar, nm_inp_dec, training, look_ahead_mask, dec_padding_mask,
+        #nm_dec_padding_mask, external_memory = False
+        tar = tf.random.uniform((batch_size, _dict["max_seq_len_dec"]), minval=0, maxval=400, dtype=tf.dtypes.int64)
+        nm_inp_dec = tf.random.uniform((batch_size, _dict["max_seq_len_nm"]), minval=0, maxval=400, dtype=tf.dtypes.int64)
+        training = True
+        look_ahead_mask = create_look_ahead_mask(tar.shape[1])
+        dec_padding_mask = create_padding_mask(tar, padding_id=5)
+        nm_dec_comb_mask = create_combined_mask(nm_inp_dec, padding_id=5) # this includes look_ahead and padding_token masking.
+
+        output, attn_dict = transformer_lm(tar, nm_inp_dec, training, look_ahead_mask, dec_padding_mask,
+                                          nm_dec_comb_mask, external_memory=False)
+
+        self.assertEqual([output.shape[0], output.shape[1], output.shape[2]],
+                         [batch_size, _dict["max_seq_len_dec"], target_vocab_size])
+        self.assertEqual(len(attn_dict.keys()), _dict["num_layers"]*2)
+
+        countNone = 0
+        countNoNone = 0
+        for key, value in attn_dict.items():
+            if value is None:
+                countNone += 1
+            else:
+                countNoNone += 1
+        self.assertEqual(countNone, _dict["num_layers"]) # half of the blocks should be None b/c no encoder input.
+        self.assertEqual(countNoNone, _dict["num_layers"])
 
 if __name__ == "__main__":
     unittest.main()

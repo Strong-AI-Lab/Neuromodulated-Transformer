@@ -2,12 +2,15 @@ import tensorflow as tf
 import math
 import time
 
+#import checkmate
+#from checkmate import BestCheckPointSaver
+
 import sys
 sys.path.append("..")
 
 from models.attention_masks import *
 
-class ParentTrainNL(tf.keras.Model):
+class ParentTrainNL:
     '''
     Class ParentTrainNL
     Description: Parent class that implements basic functions needed for training.
@@ -23,19 +26,20 @@ class ParentTrainNL(tf.keras.Model):
         strategy: (tf.distribute...) Strategy for splitting the training across multiple gpus.
     '''
     def __init__(self, model, optimizer, loss_object, loss_function, tokenizer,
-                 checkpoint_path, strategy, pad_token="<pad>"):
-        super(ParentTrainNL, self).__init__()
+                 checkpoint_recent_path, checkpoint_best_path, strategy, pad_token="<pad>"):
 
         self.model = model
         self.optimizer = optimizer
         self.loss_object = loss_object
         self.loss_function = loss_function
         self.tokenizer = tokenizer
-        self.checkpoint_path = checkpoint_path
+
+        self.checkpoint_recent_path = checkpoint_recent_path
+        #self.checkpoint_best_path = checkpoint_best_path
         self.strategy = strategy
 
         self.padding_id = self.tokenizer.encode(pad_token,
-                                                add_special_tokens=True,
+                                                add_special_tokens=False,
                                                 pad_to_max_length=False,
                                                 return_token_type_ids=False,
                                                 return_attention_mask=False)
@@ -44,46 +48,51 @@ class ParentTrainNL(tf.keras.Model):
         else:
             raise Exception("The padding token should only have one id!")
 
-        self._create_checkpoint()
+        self._create_recent_checkpoint()
+        #self._create_best_checkpoint()
 
-    def _create_checkpoint(self):
+    def _create_recent_checkpoint(self):
         self.ckpt = tf.train.Checkpoint(model=self.model,
                                         optimizer=self.optimizer)
-        self.ckpt_manager = tf.train.CheckpointManager(self.ckpt, self.checkpoint_path, max_to_keep=10)  # maybe remove max_to_keep?
+        self.ckpt_manager = tf.train.CheckpointManager(self.ckpt, self.checkpoint_recent_path, max_to_keep=5)  # maybe remove max_to_keep?
 
         if self.ckpt_manager.latest_checkpoint:
             self.ckpt.restore(self.ckpt_manager.latest_checkpoint)
             print("Latest checkpoint restored.")
+
+    def _create_best_checkpoint(self):
+        pass
 
 
     def train_step(self, tar_inp, tar_real, nm_inp):
 
         look_ahead_mask = create_combined_mask(tar_inp, padding_id=self.padding_id) # combined mask is padded and look ahead together.
         dec_padding_mask = None # becuase no enc_output as input.
-        nm_dec_padding_mask = create_combined_mask(nm_inp, padding_id=self.padding_id)
+        nm_dec_padding_mask = create_combined_mask(nm_inp, padding_id=self.padding_id) # combined mask overcomes cheating/look ahead problem.
 
         loss, size = 0, 0
         try:
             with tf.GradientTape() as tape:
-                #print("REACH1")
-                print(f"tar_inp.shape {tar_inp.shape}"
-                      f"tar_real.shape {tar_real.shape}"
-                      f"nm_inp.shape {nm_inp.shape}")
+
                 predictions, _ = self.model(tar_inp, nm_inp, True, look_ahead_mask, dec_padding_mask,
                                                   nm_dec_padding_mask, external_memory=False) # ret (output, attention weights)
-                #print("REACH2")
+
                 loss, size = self.loss_function(tar_real, predictions, self.loss_object, self.padding_id)
-                #print(f"loss: {loss} \n size: {size}")
+
                 loss_ = loss/size
 
-            gradients = tape.gradient(loss_, self.model.trainable_variables)  # TODO should check trainable variables in my model.
+            gradients = tape.gradient(loss_, self.model.trainable_variables)
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
         except AssertionError as ae:
             print(f"Assertion error was caught, meaning that the number of elements in this batch is zero. \n Setting the loss and size to zero...")
-        except:
-            print(f"Error... Continuing... Setting the loss and size to zero for this batch subset.")
+        except Exception as e:
+            print(f"The error message is:\n {e}")
 
         return loss, size
+
+    #(input_signature=[tf.TensorSpec(shape=(None, None), dtype=tf.int64),
+    #tf.TensorSpec(shape=(None, None), dtype=tf.int64),
+    #tf.TensorSpec(shape=(None, None), dtype=tf.int64),])
 
     @tf.function
     def _distributed_train_step(self, tar_inp, tar_real, nm_inp):
@@ -101,8 +110,6 @@ class ParentTrainNL(tf.keras.Model):
         else:
             loss, size = self.train_step(tar_inp, tar_real, nm_inp)
 
-        #print(f"LOSSSSSSSSSSSSSSSSSSSSS {0+loss}")
-        #print("REACH end of disttr train step...")
         return loss, size
 
     def train_(self, epoch_start, epoch_end, save_filepath_train, save_filepath_val, data_dict):
@@ -114,14 +121,12 @@ class ParentTrainNL(tf.keras.Model):
             epoch_loss = 0 # sum up all of the losses
             epoch_size = 0 # then divide by the total number of losses.
             for (tar_inp, tar_real, nm_inp) in data_dict["train"]:
-                #print(f"tar_inp.shape: {tar_inp.shape}"
-                #      f"tar_real.shape: {tar_real.shape}"
-                #      f"nm_inp.shape: {nm_inp.shape}")
-                print("Before the distr training step is called.")
+
                 loss, size = self._distributed_train_step(tar_inp, tar_real, nm_inp)
-                print("After the distributed training step is called.")
-                print(f"Loss: {loss} ---"
-                      f"Size: {size} ---")
+                if size == 0:
+                    print(f"The size is zero, skip the current batch, it will not be counted due to an error!")
+                    continue # start the next batch.
+
                 epoch_loss += loss
                 epoch_size += size
 
@@ -136,7 +141,7 @@ class ParentTrainNL(tf.keras.Model):
                     bpc = dict_["bpc"]
 
                 if batch % 1 == 0:
-                    print(f'Epoch {e+1} Batch {batch} Loss {loss_:.4f} Perplexity {perp:.4f} Bits Per Character (bpc) {bpc:.4f}')
+                    print(f'Epoch {e+1} Batch {batch} Loss {loss_:.4f} Perplexity {perp:.4f} Bits Per Word (bpc) {bpc:.4f}')
                 batch += 1
 
             total_loss = epoch_loss/epoch_size # this is the loss of all words divided by the number of words (while eliminating the effect of the padding tokens)
@@ -146,14 +151,13 @@ class ParentTrainNL(tf.keras.Model):
             if "bpc" in dict_.keys():
                 epoch_bpc = dict__["bpc"]
             print(
-                f'Epoch {e+1} Loss {total_loss:.4f} Perplexity {epoch_perp:.4f} Bits Per Character (bpc) {epoch_bpc:.4f}')
+                f'Epoch {e+1} Loss {total_loss:.4f} Perplexity {epoch_perp:.4f} Bits Per Word (bpc) {epoch_bpc:.4f}')
             print(f'Time taken for epoch {e+1}: {time.time() - start:.2f} secs\n')
             # TODO: change from %1 later, just testing to see if works initially.
             if (e+1) % 1 == 0:
                 ckpt_save_path = self.ckpt_manager.save()
                 print(f'Saving checkpoint for epoch {e+1} at {ckpt_save_path}')
 
-            # TODO implement below. Save the results in a text file.
             header = True if e == 0 else False
             self._save_epoch_results("train", e+1, save_filepath_train, header, total_loss, epoch_perp, epoch_bpc)
 
@@ -164,7 +168,7 @@ class ParentTrainNL(tf.keras.Model):
     def _run_validation(self, e, save_filepath, data_dict):
         start = time.time()
         #batch = 0
-        # Still calculate below to get the perplexity and bits per character scores.
+        # Still calculate below to get the perplexity and bits per Word scores.
         epoch_loss = 0  # sum up all of the losses
         epoch_size = 0  # then divide by the total number of losses.
         for (tar_inp, tar_real, nm_inp) in data_dict["val"]:
@@ -184,7 +188,7 @@ class ParentTrainNL(tf.keras.Model):
             # only care about final result.
             #if batch % 1 == 0:
             #    print(
-            #        f'Epoch {e+1} Batch {batch} Loss {loss_:.4f} Perplexity {perp:.4f} Bits Per Character (bpc) {bpc:.4f}')
+            #        f'Epoch {e+1} Batch {batch} Loss {loss_:.4f} Perplexity {perp:.4f} Bits Per Word (bpc) {bpc:.4f}')
             #batch += 1
 
         total_loss = epoch_loss / epoch_size  # this is the loss of all words divided by the number of words (while eliminating the effect of the padding tokens)
@@ -194,7 +198,7 @@ class ParentTrainNL(tf.keras.Model):
         if "bpc" in dict_.keys():
             epoch_bpc = dict__["bpc"]
         print(
-            f'Epoch {e+1} Val Loss {total_loss:.4f} Val Perplexity {epoch_perp:.4f} Val Bits Per Character (bpc) {epoch_bpc:.4f}')
+            f'Epoch {e+1} Val Loss {total_loss:.4f} Val Perplexity {epoch_perp:.4f} Val Bits Per Word (bpc) {epoch_bpc:.4f}')
         print(f'Time taken for one epoch (val) {e+1}: {time.time() - start:.2f} secs\n')
 
         header = True if e == 0 else False
@@ -220,7 +224,6 @@ class ParentTrainNL(tf.keras.Model):
 
         return loss, size
 
-    @tf.function
     def _distributed_val_step(self, tar_inp, tar_real, nm_inp):
         if self.strategy is not None:
             loss, size = self.strategy.run(self.val_step, args=(tar_inp, tar_real, nm_inp,))
@@ -239,9 +242,10 @@ class ParentTrainNL(tf.keras.Model):
 
         return loss, size
 
+    # Note: Here I calculate it the same way as in transformer-xl.
     def perplexity_bpc_function(self, loss):
         perplexity = tf.math.exp(tf.reduce_mean(loss))
-        bpc = tf.reduce_mean(loss) / tf.constant(math.log(2))
+        bpc = tf.reduce_mean(loss) / tf.constant(math.log(2)) # log is the natural logarithm (i.e. to base e).
         return {
             "perplexity": perplexity,
             "bpc": bpc
@@ -298,20 +302,14 @@ class ParentTrainNL(tf.keras.Model):
         # TODO: implement this later.
         pass
 
-def loss_function_sequence_split(real, pred, loss_object, padding_id, newline_tok=[False, 0]):
+def loss_function_sequence_split(real, pred, loss_object, padding_id):
 
     # use the mask below to remove influence from padding tokens.
     mask = tf.math.logical_not(tf.math.equal(real, padding_id)) # padding mask?
-    # TODO: consider other tokens other than <pad> to do this to.
-    mask2 = None
-    if newline_tok[0]:
-        assert newline_tok[1] != padding_id, f"The new line token id ({newline_tok[1]}) and padding token " \
-                                             f"id ({padding_id}) should not be equal."
-        mask2 = tf.math.logical_not(tf.math.equal(real, newline_tok[1]))
+
     loss_ = loss_object(real, pred)
     mask = tf.cast(mask, dtype=loss_.dtype)
-    if mask2 is not None:
-        mask += mask2 # as they don't overlap, this can be done. If they are equal the assert above will go off.
+
     loss_ *= mask
 
     # below returns average loss for each individual item in batch, this is equal to the length of the batch size.

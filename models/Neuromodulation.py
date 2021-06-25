@@ -4,7 +4,7 @@ sys.path.append("..")
 from models.Transformer import *
 from models.attention_masks import *
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "4" #"0,1,2,3"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "4" #"0,1,2,3"
 
 class NMPWFeewForwardNetwork(tf.keras.layers.Layer):
     '''
@@ -166,7 +166,7 @@ class NMDecoderLayer(tf.keras.layers.Layer):
         rate: (float) Number between 0 and 1 that is used for the dropout rate in dropout layers.
         nm_mha: (boolean) True if NMMultiHeadAttention is using a neuromodulation attention replacement; Falsse otherwise.
     '''
-    def __init__(self, d_model, num_heads, dff, ffn_dict, max_seq_len, rate=0.1, nm_mha=False):
+    def __init__(self, d_model, num_heads, dff, ffn_dict, max_seq_len, rate=0.1, nm_mha=False, enc_out=True):
         super(NMDecoderLayer, self).__init__()
 
         # only needed for the encoder - the decoder doesn't turn in to a NM network.
@@ -174,19 +174,23 @@ class NMDecoderLayer(tf.keras.layers.Layer):
         self.max_seq_len = max_seq_len
         self.nm_mha = nm_mha
         self.ffn_dict = ffn_dict
+        self.enc_out = enc_out
 
         # currently mha1 is the normal multihead attention and is unchanged.
         self.mha1 = MultiHeadAttention(d_model, num_heads)
+        #if self.enc_out:
         self.mha2 = NMMultiHeadAttention(d_model, num_heads, self.max_seq_len, nm_mha=self.nm_mha)
         #self.mha2 = MultiHeadAttention(d_model, num_heads)
 
         self.ffn = NMPWFeewForwardNetwork(self.ffn_dict)
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for (masked) multi-head attention layer.
+        #if self.enc_out:
         self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.
         self.layernorm3 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for feed forward network.
 
         self.dropout1 = tf.keras.layers.Dropout(rate)
+        #if self.enc_out:
         self.dropout2 = tf.keras.layers.Dropout(rate)
         self.dropout3 = tf.keras.layers.Dropout(rate)
 
@@ -222,17 +226,24 @@ class NMDecoderLayer(tf.keras.layers.Layer):
         attn1 = self.dropout1(attn1, training=training)
         out1 = self.layernorm1(x + attn1)
 
-        attn2, attn_weights_block2 = None, None
-        if (attn_logit is not None) and (nm_attn is not None):
-            attn2, attn_weights_block2 = self.mha2(enc_output, enc_output,
-                                                   out1, attn_logit, mask=padding_mask)  # (batch_size, target_seq_len, d_model)
-        else:
-            attn2, attn_weights_block2 = self.mha2(enc_output, enc_output,
-                                                   out1, mask=padding_mask) # (batch_size, target_seq_len, d_model)
-        attn2 = self.dropout2(attn2, training=training)
-        out2 = self.layernorm2(out1 + attn2)
+        if self.enc_out:
+            attn2, attn_weights_block2 = None, None
+            if (attn_logit is not None) and (nm_attn is not None):
+                attn2, attn_weights_block2 = self.mha2(enc_output, enc_output,
+                                                       out1, attn_logit, mask=padding_mask)  # (batch_size, target_seq_len, d_model)
+            else:
+                attn2, attn_weights_block2 = self.mha2(enc_output, enc_output,
+                                                       out1, mask=padding_mask) # (batch_size, target_seq_len, d_model)
 
-        # No nedd
+            attn2 = self.dropout2(attn2, training=training)
+            out2 = self.layernorm2(out1 + attn2)
+        else:
+            # we don't process above, just set to first layers output.
+            attn2 = attn1
+            out2 = out1
+            attn_weights_block2 = None
+
+        # No need
         output_dict = dict()
         ffn_output = self.ffn(out2)["default"] # (batch_size, target_seq_len, d_model)
         ffn_output = self.dropout3(ffn_output, training=training)
@@ -336,7 +347,7 @@ class NMEncoder(tf.keras.layers.Layer):
 class NMDecoder(tf.keras.layers.Layer):
 
     def __init__(self, num_layers, d_model, num_heads, dff, ffn_dict, max_seq_len, target_vocab_size,
-                maximum_position_encoding, rate=0.1, nm_mha=False, start_layer_nm=False):
+                maximum_position_encoding, rate=0.1, nm_mha=False, start_layer_nm=False, enc_out=True):
         super(NMDecoder, self).__init__()
 
         # note, difference here is that it performs on layer at a time and then returns it.
@@ -349,11 +360,13 @@ class NMDecoder(tf.keras.layers.Layer):
         self.d_model = d_model
         self.counter = 0
 
+        self.enc_out = enc_out
+
         self.embedding = tf.keras.layers.Embedding(target_vocab_size, d_model)
         self.pos_encoding = positional_encoding(maximum_position_encoding, d_model)
 
         #d_model, num_heads, dff, ffn_dict, max_seq_len, rate = 0.1, nm_mha = False
-        self.decoder_layers = [NMDecoderLayer(d_model, num_heads, dff, ffn_dict, max_seq_len, rate, nm_mha) for _ in range(self.num_layers)]
+        self.decoder_layers = [NMDecoderLayer(d_model, num_heads, dff, ffn_dict, max_seq_len, rate, nm_mha, self.enc_out) for _ in range(self.num_layers)]
         #if self.start_layer_nm:
         #    self.start_layer_dense = [tf.keras.layers.Dense(d_model) for _ in range(num_layers)] # input is d_model*2
         self.dropout = tf.keras.layers.Dropout(rate)
@@ -375,6 +388,11 @@ class NMDecoder(tf.keras.layers.Layer):
         # have the option to perform all at once or each individually.
         seq_len = tf.shape(x)[1]
         attention_weights = {}
+
+        if enc_output is None:
+            assert self.enc_out == False, "if enc_output is None, then self.enc_output parameter should be set to False!"
+        else:
+            assert self.enc_out == True, "if enc_output is not None, then self.enc_output should be True!"
 
         if self.counter == 0:
             x = self.embedding(x)  # (batch_size, target_seq_len, d_model)
@@ -719,6 +737,8 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
         for i in range(self.num_heads):
             z = self.nm_layers_logit[i](gate_inp_logits)
             #print("z shape \n", z.shape, "\n")
+            # expand axis = 1, is to match dimension with scaled attentino logits.
+            # This dimension will be equal to num_heads.
             if gate_input_head is None:
                 gate_input_head = tf.expand_dims(z, axis=1)
                 #print("test \n", gate_input_head.shape, "\n")
@@ -731,14 +751,15 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
         assert scaled_attention_logits.shape == gate_input_head.shape, f"Dimensions don't match!\nscaled_attention_logits:{scaled_attention_logits.shape}\ngate_input_head:{gate_input_head.shape}"
         if mask is not None:
             scaled_attention_logits += (mask * -1e9)
-            gate_input_head += (mask * -1e9)
+            gate_input_head += (mask * -1e9) # mask the gated head aswell before softmax is performed.
 
         gate_inp = tf.nn.softmax(gate_input_head, axis=-1)
 
         attention_weights = gate_inp * scaled_attention_logits # (batch_size, seq_len_q, seq_len_k)
 
-        #TODO: Decide if this is to be here? Do I want a softmax here?
-        attention_weights = tf.nn.softmax(attention_weights, axis=-1)
+        # here attention is entirely replaced with gating from the neuromodulation encoder.
+        # comment out below if want the softmax as per the original scaled dot product attention.
+        #attention_weights = tf.nn.softmax(attention_weights, axis=-1)
 
         output = tf.matmul(attention_weights, v) # (..., seq_len_q, depth_v)
 
