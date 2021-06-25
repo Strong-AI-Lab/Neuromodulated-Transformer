@@ -13,7 +13,7 @@ The following three files need to be downloaded and put in the folder `datasets'
 The file to execute training is called `train_nmdec_wikitext.py'
   python3 train_nmdec_wikitext.py or python train_nmdec_wikitext.py to start training.
     
-The current file is currently set up to perform two epochs of training on the test dataset only.
+The current file is currently set up to perform two epochs of training on the train dataset only.
 
 Line 3: Change the integer to gpu's device number that you wish to train on.
 Line 78: batch size of 4 is used, this results in crashing on server 1, hopefully not on server 2.
