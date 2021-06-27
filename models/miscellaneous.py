@@ -249,17 +249,19 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
                                                                        f"The Query and Key are the following values: Q{q} \n K{k}"
 
         if mask is not None:
-            # uncomment below if softmax to the gated inputs.
-            scaled_attention_logits += (mask * -1e9)
-            # uncomment below if softmax is not to be used. # to be fair because gate_inp is
-            # padded below it has no effect whatsoever as it would be multiplied by zero anyway.
-            # flip zeroes to ones and ones to zeroes.
-            #scaled_attention_logits *= tf.cast(tf.math.equal(mask, 0), tf.float32) # flip 0's and 1's and multiply. Has the same effect for when softmax isn't used.
             gate_input_head += (mask * -1e9) # mask the gated head aswell before softmax is performed so weight isn't given to invalid tokens.
 
         gate_inp = tf.nn.softmax(gate_input_head, axis=-1)
 
         attention_weights = gate_inp * scaled_attention_logits # (batch_size, seq_len_q, seq_len_k)
+
+        if mask is not None:
+            # uncomment below if softmax to the gated inputs.
+            attention_weights += (mask * -1e9) # note: the mask locations should be zero, so applying this here if softmax is to come is necessary.
+            # uncomment below if softmax is not to be used. # to be fair because gate_inp is
+            # padded below it has no effect whatsoever as it would be multiplied by zero anyway.
+            # flip zeroes to ones and ones to zeroes.
+            # attention_weights *= tf.cast(tf.math.equal(mask, 0), tf.float32) # flip 0's and 1's and multiply. Has the same effect for when softmax isn't used.
 
         # here attention is entirely replaced with gating from the neuromodulation encoder.
         # comment out below if want the softmax as per the original scaled dot product attention.
