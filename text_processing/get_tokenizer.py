@@ -31,7 +31,7 @@ if __name__ == "__main__":
     pad_tok_id = tokenizer.encode("<pad>", add_special_tokens=True, pad_to_max_length=False,
                                               return_token_type_ids=False, return_attention_mask=False)
     print(f"The pad token id is {pad_tok_id}.")
-    print(tokenizer.batch_encode_plus(["the hawks are overrated","shaq is a beast and is a monster! marley hello hello hey hi hi a a a a a a a a a a a a a a "], max_length=20,
+    print(tokenizer.batch_encode_plus(["the hawks are overrated","shaq is a beast and a monster!"], max_length=20,
                                 add_special_tokens=True, pad_to_max_length=True,
                                 return_token_type_ids=False, return_attention_mask=False,
                                       return_overflowing_tokens=True))
