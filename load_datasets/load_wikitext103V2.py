@@ -43,25 +43,22 @@ class load_wikitext103V2(object):
         self.pad_tok_id = None
 
         if tokenizer is not None:
-            self.start_tok_id = self.tokenizer.encode(self.start_tok, add_special_tokens=True, pad_to_max_length=False,
+            self.start_tok_id = self.tokenizer.encode(self.start_tok, add_special_tokens=False, pad_to_max_length=False,
                                         return_token_type_ids=False, return_attention_mask=False)
             if len(self.start_tok_id) != 1 and (isinstance(self.start_tok_id, list)):
-                raise Exception(f"The number of ids the start token is encoded into should be one, got {len(self.start_tok_id)}!")
+                raise Exception(f"The number of ids the start token is encoded into should be one, got {self.start_tok_id}!")
             else:
                 self.start_tok_id = self.start_tok_id[0]
             print(f"The start token id is: {self.start_tok_id}")
 
-            self.end_tok_id = self.tokenizer.encode(self.end_tok,
-                                        add_special_tokens=True,
-                                        pad_to_max_length=False,
-                                        return_token_type_ids=False,
-                                        return_attention_mask=False)
+            self.end_tok_id = self.tokenizer.encode(self.end_tok, add_special_tokens=False, pad_to_max_length=False,
+                                        return_token_type_ids=False, return_attention_mask=False)
             if len(self.end_tok_id) != 1 and (isinstance(self.end_tok_id, list)):
                 raise Exception(f"The number of ids the end token is encoded into should be one, got {len(self.end_tok_id)}!")
             else:
                 self.end_tok_id = self.end_tok_id[0]
             print(f"The end token id is: {self.end_tok_id}")
-            self.pad_tok_id = self.tokenizer.encode(self.pad_tok, add_special_tokens=True, pad_to_max_length=False,
+            self.pad_tok_id = self.tokenizer.encode(self.pad_tok, add_special_tokens=False, pad_to_max_length=False,
                                                       return_token_type_ids=False, return_attention_mask=False)
             if len(self.pad_tok_id) != 1 and (isinstance(self.pad_tok_id, list)):
                 raise Exception(
@@ -85,6 +82,8 @@ class load_wikitext103V2(object):
         else:
             self._read_json(load_data[1])
 
+        #print(self.data_dict)
+
     def _process_raw_file(self):
 
         data = None
@@ -96,7 +95,7 @@ class load_wikitext103V2(object):
             main_heading = None
             document_content = ""
             for i in range(len(data)):
-                if re.match(self.main, data[i]):
+                if re.match(self.main_heading_pattern, data[i]):
                     if document_content == "": # append the heading here as well as we want it in the input as well.
                         counter += 1
                         if counter > 1: raise Exception(f"counter should never reach a value greater than 1!")
@@ -126,10 +125,10 @@ class load_wikitext103V2(object):
 
 
 
-    def _default_tok_strategy_iterator(self, shuffle, pad, nm_aux_tokens):
-
+    def default_tok_strategy_iterator(self):
+        # shufle, pad, nm_aux
         nm_aux_tok = []
-        for word in nm_aux_tokens:
+        for word in self.aux_tok:
             w = tokenizer.encode(word,
                      add_special_tokens=False,
                      pad_to_max_length=False,
@@ -139,8 +138,9 @@ class load_wikitext103V2(object):
             else: w = w[0]
             nm_aux_tok.append(w)
 
-        keys = self.data_dict.keys()
-        if shuffle:
+        keys = list(self.data_dict.keys())
+        #print(keys)
+        if self.shuffle:
             random.shuffle(keys) # shuffles inplace.
 
         for i, key in enumerate(keys):
@@ -150,6 +150,7 @@ class load_wikitext103V2(object):
                                        pad_to_max_length=False,
                                        return_token_type_ids=False,
                                        return_attention_mask=False)
+            article_ids = article_ids["input_ids"]
             start_index = 0
             end_index = self.max_seq_len
             tar_inp = None
@@ -163,12 +164,14 @@ class load_wikitext103V2(object):
                     tar_inp = article_ids[start_index:end_index]
                     tar_real = article_ids[start_index+1:end_index+1] # TODO: test and make sure this works.
                 else:
-                    tar_inp = article_ids[start_index:article_len-1]
+                    tar_inp = article_ids[start_index:article_len-1] # -1 so there is an output token for the target.
                     tar_real = article_ids[start_index+1:article_len] # i.e. shifted to the right.
 
-                tar_inp = tar_inp + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_inp))]
+                if self.pad:
+                    tar_inp = tar_inp + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_inp))]
+                    tar_real = tar_real + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_real))]
+
                 nm_inp = nm_aux_tok + tar_inp
-                tar_real = tar_real + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_real))]
 
                 tar_inp = tf.cast(tf.convert_to_tensor(np.asarray(tar_inp)), dtype=tf.dtypes.int64)
                 tar_real = tf.cast(tf.convert_to_tensor(np.asarray(tar_real)), dtype=tf.dtypes.int64)
@@ -179,22 +182,24 @@ class load_wikitext103V2(object):
 
                 yield tar_inp, nm_inp, tar_real
 
-                # self.start_tok_id
-
     def get_tf_dataset_generator(self, process_strategy, shuffle=False, pad=True, *nm_aux_tokens):
+
+        self.shuffle = shuffle
+        self.pad = pad
 
         if len(nm_aux_tokens) > 0:
             for word in nm_aux_tokens:
                 assert isinstance(word, str), f"The word should be of string format. {word} is of format {type(word)}!"
 
-        aux_tok_id = [word for word in nm_aux_tokens]
+        aux_tok = [word for word in nm_aux_tokens]
+        self.aux_tok = aux_tok
 
         generator = None
 
         if process_strategy == "default_tokenize":
-            generator = tf.data.Dataset.from_generator(self._default_strategy_iterator(shuffle, pad), output_types=(tf.dtypes.int64,
-                                                                                                                    tf.dtypes.int64,
-                                                                                                                    tf.dtypes.int64))
+            generator = tf.data.Dataset.from_generator(self.default_tok_strategy_iterator, output_types=(tf.dtypes.int64,
+                                                                                                         tf.dtypes.int64,
+                                                                                                         tf.dtypes.int64))
         elif process_strategy == "default_string":
             pass
         elif process_strategy == "default_str_tok": # note: needed for my reading strategies later.
@@ -202,6 +207,46 @@ class load_wikitext103V2(object):
         else: raise Exception(f"Invalid processing strategy: {process_strategy}")
 
         return generator
+
+if __name__ == "__main__":
+    tokenizer = get_tfxl_tokenizer()
+
+    filepath = "/large_data/wikitext-103/wiki.valid.tokens"
+    end_tok = "</s>"
+    pad_tok = "<pad>"
+    strategy = "default"
+    load_data = [False, ""]
+
+    wiki_loader = load_wikitext103V2(filepath=filepath, tokenizer=tokenizer, end_tok=end_tok, pad_tok=pad_tok, strategy=strategy,
+                                     load_data=load_data)
+    #wiki_loader.save_json("/large_data/wikitext-103/val_test_v2.txt")
+    #load_data = [True, "/large_data/wikitext-103/val_test_v2.txt"]
+    #wiki_loader = load_wikitext103V2(filepath=filepath, tokenizer=tokenizer, end_tok=end_tok, pad_tok=pad_tok, strategy=strategy,
+    #                                 load_data=load_data)
+
+    process_strategy="default_tokenize"
+    shuffle=True
+    pad=True
+    generator = wiki_loader.get_tf_dataset_generator(process_strategy, shuffle, pad, "<dec>", "<lm>", "<confidence>")
+    generator = generator.batch(4)
+
+    print("<dec> token id:",tokenizer.encode("<dec>", add_special_tokens=False, pad_to_max_length=False,
+                                        return_token_type_ids=False, return_attention_mask=False))
+    print("<lm> token id:", tokenizer.encode("<lm>", add_special_tokens=False, pad_to_max_length=False,
+                                              return_token_type_ids=False, return_attention_mask=False))
+    print("<confidence> token id:", tokenizer.encode("<confidence>", add_special_tokens=False, pad_to_max_length=False,
+                                              return_token_type_ids=False, return_attention_mask=False))
+
+    counter = 0
+    for batch, (inp, nm, tar) in enumerate(generator):
+        print(f"batch: {batch}")
+        print(f"inp.shape: {inp.shape} \t inp: {inp} \n"
+              f"nm.shape: {nm.shape} \t nm: {nm} \n"
+              f"tar.shape: {tar.shape} \t tar: {tar} \n")
+        counter += 1
+        if counter == 20: break
+
+
 
 
 
