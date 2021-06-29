@@ -5,11 +5,12 @@ First clone the repository:
   Because it is a private repository at present downloading the whole project as a zip may be easier.
 
 The following three files need to be downloaded and put in the folder `datasets'.
-  https://drive.google.com/file/d/1zDtp3MIR1oHSoI1v3MVJ9eHxooSshuyv/view?usp=drive_web
+
+  https://drive.google.com/file/d/1zDtp3MIR1oHSoI1v3MVJ9eHxooSshuyv/view?usp=sharing
   
-  https://drive.google.com/file/d/17F-UzQHvPLoKkD36tzRW4mWhMs_YU86p/view?usp=drive_web
+  https://drive.google.com/file/d/17F-UzQHvPLoKkD36tzRW4mWhMs_YU86p/view?usp=sharing
   
-  https://drive.google.com/file/d/1oLCyxK3nP8wBGwwhUWDEmwXr0x86gGeV/view?usp=drive_web
+  https://drive.google.com/file/d/1oLCyxK3nP8wBGwwhUWDEmwXr0x86gGeV/view?usp=sharing
 
 The file to execute training is called `train_nmdec_wikitext.py'
   python3 train_nmdec_wikitext.py or python train_nmdec_wikitext.py to start training.
