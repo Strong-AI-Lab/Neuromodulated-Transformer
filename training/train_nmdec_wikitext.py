@@ -1,5 +1,6 @@
 import os
 # NOTE: below should always be forst.
+os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices' # TODO test that this works.
 os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 
 import tensorflow as tf
