@@ -2,7 +2,7 @@
 File name: Decoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 05/07/21
+Data last modified: 08/07/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -65,8 +65,7 @@ class DecoderLayer(tf.keras.layers.Layer):
         self.mha1 = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=nm_attn)
         self.mha2 = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False) # restriction here is that it is never gated given a context.
 
-        c = init_vanilla_ffn(d_model, dff) # The vanilla feed forward network initialization.
-        self.ffn = FeedForwardNetwork(c)
+        self.ffn = FeedForwardNetwork(init_vanilla_ffn(d_model, dff))
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6) # TODO: check what epsilon actually does.
         self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
@@ -89,10 +88,11 @@ class DecoderLayer(tf.keras.layers.Layer):
             nm_inp_gating_attn: (tf.Tensor; [batch_size, nm_max_seq_len, nm_max_seq_len]) Context dependant gating tensor (in logit form) from the neuromodulated encoder for attn weights. \n
             nm_inp_gating_eol: (tf.Tensor; [batch_size, max_seq_len, d_model] Context dependant gating tensor (in logit form) from the neuromodulated encoder for end of layer (eol) gating.
         Return:
-            output: (tf.Tensor; [batch_size, max_seq_len, d_model])
+            out3: (tf.Tensor; [batch_size, max_seq_len, d_model])
             attn_weights_block1: (tf.Tensor; [batch_size, num_heads, (max_)seq_len, (max_)seq_len])
             attn_weights_block2: (tf.Tensor; [batch_size, num_heads, (max_)seq_len(_q), (max_)seq_len(_k)])
         '''
+        assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
         if nm_inp_gating_attn is not None:
             assert self.nm_attn, f"If nm_inp_gating_attn is not None, then nm_attn should be set to True, got {self.nm_attn}!"
@@ -144,7 +144,7 @@ class Decoder(tf.keras.layers.Layer):
                  rate=0.1, nm_attn=False, nm_eol=False):
         '''
         Function: __init__ \n
-        Description: Initializes the decoder class. \n
+        Description: Initialization of the decoder class. \n
         Input:
             num_layers: (int) The number of decoder layers in the decoder. \n
             d_model: (int) The dimension of the transformer layer. \n

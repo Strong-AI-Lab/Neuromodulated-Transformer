@@ -17,13 +17,61 @@ def init_vanilla_ffn(d_model, dff):
     Description: Initializes the feed-forward network for a transformer layer. \n
     Input:
         d_model: (int) The dimension of the transformer model. \n
-        dff: (dff) The dimension of the feed-forward network.
+        dff: (int) The dimension of the feed-forward network.
     Return:
          (tf.keras.Sequential)
     '''
     return tf.keras.Sequential([
         tf.keras.layers.Dense(dff, activation='relu'),
         tf.keras.layers.Dense(d_model, activation=None)
+    ])
+
+def init_attn_gate_ffn(dff, seq_len):
+    '''
+    Function: init_attn_gate_ffn \n
+    Description: Initializes a feed-forward network for a transformer layer. \n
+    Input:
+        dff: (int) The dimension of the feed-forward network. \n
+        seq_len: (int) The dimension of the last weight (W_2) in the feed-forward network.
+            (this should be equal to the maximum sequence length of the nm_encoder {primiary use case})
+    Return:
+         (tf.keras.Sequential)
+    '''
+    return tf.keras.Sequential([
+        tf.keras.layers.Dense(dff, activation='relu'),
+        tf.keras.layers.Dense(seq_len, activation=None)
+    ])
+
+def init_metacognition_sequence_ffn(dff):
+    '''
+    Function: init_metacognition_sequence_ffn \n
+    Description: Initializes a feed-forward network for a transformer layer.
+        It generates a score between 0 and 1 for each word in the input. \n
+    Input:
+        dff: (int) The dimension of the feed-forward network. \n
+    Return:
+         (tf.keras.Sequential)
+    '''
+    return tf.keras.Sequential([
+        tf.keras.layers.Dense(dff, activation='relu'),
+        tf.keras.layers.Dense(1, activation='sigmoid')
+    ])
+
+def init_metacognition_single_ffn(dff):
+    '''
+    Function: init_metacognition_single_ffn \n
+    Description: Initializes a feed-forward network for a transformer layer.
+        It generates a (single) score between 0 and 1. \n
+    Input:
+        dff: (int) The dimension of the feed-forward network. \n
+    Return:
+         (tf.keras.Sequential)
+    '''
+    return tf.keras.Sequential([
+        tf.keras.layers.Dense(dff, activation='relu'),
+        tf.keras.layers.Dense(1, activation='relu'), # TODO: put relu here?
+        tf.keras.layers.Permute((2,1)),
+        tf.keras.layers.Dense(1, activation='sigmoid') # output is (batch_size, 1, 1) squeeze manually after call.
     ])
 
 class FeedForwardNetwork(tf.keras.layers.Layer):
