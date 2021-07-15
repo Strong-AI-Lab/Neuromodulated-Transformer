@@ -29,13 +29,10 @@ class DecoderLayer(tf.keras.layers.Layer):
         mha2: Multi-head attention 1 (encoder influence; attends the decoder's input to the encoder's output). \n
         ffn: Feed forward network. \n
         layernorm1: Layernormalization layer, occuring after the first multi-head attention layer (mha1). \n
-        layernorm2: Layernormalization layer, occuring after the second multi-head attention layer (mha2). \n
-        layernorm3: Layernormalization layer, occuring after the feed-forward-network (ffn). \n
+        layernorm2: Layernormalization layer, occuring after the feed-forward-network (ffn). \n
         dropout1: Dropout layer which occurs after the first multi-head attention layer and before the residual connection
             and layer normalization. \n
-        dropout2: Dropout layer which occurs after the second multi-head attention layer and before the residual connection
-            and layer normalization. \n
-        dropout3: Dropout layer which occurs after the feed-forward-network layer and before the residual connection
+        dropout2: Dropout layer which occurs after the feed-forward-network layer and before the residual connection
             and layer normalization.
     '''
 
@@ -69,19 +66,18 @@ class DecoderLayer(tf.keras.layers.Layer):
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6) # TODO: check what epsilon actually does.
         self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
-        self.layernorm3 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
+        #self.layernorm3 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
 
         self.dropout1 = tf.keras.layers.Dropout(rate)
         self.dropout2 = tf.keras.layers.Dropout(rate)
-        self.dropout3 = tf.keras.layers.Dropout(rate)
+        #self.dropout3 = tf.keras.layers.Dropout(rate)
 
-    def call(self, x, enc_output, training, mha1_mask, mha2_mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
+    def call(self, x, training, mha1_mask, mha2_mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
         '''
         Function: call \n
         Description: Overrides parent class's call function (i.e. one run through DecoderLayer). \n
         Input:
             x: (tf.Tensor; [batch_size, max_seq_len(_target), d_model]) Input tensor to the decoder layer. \n
-            enc_output: (tf.Tensor; [batch_size, max_seq_len(_inp), d_model] Encoder output tensor. If None then process without encoder output. \n
             training: (bool) True if Dropout layers are to be in training mode; False otherwise. \n
             mha1_mask: (tf.Tensor) Mask for multi-head attention layer 1. \n
             mha2_mask: (tf.Tensor) Mask for multi-head attention layer 2. \n
@@ -103,24 +99,24 @@ class DecoderLayer(tf.keras.layers.Layer):
         attn1 = self.dropout1(attn1, training=training)
         out1 = self.layernorm1(x + attn1)
 
-        out2, attn_weights_block2 = None, None
-        if enc_output is not None: # i.e. run through as normal.
-            attn2, attn_weights_block2 = self.mha2(enc_output, enc_output, out1, nm_inp_gating=None, mask=mha2_mask)
-            attn2 = self.dropout2(attn2, training=training)
-            out2 = self.layernorm2(out1 + attn2)
-        else: # skip this attention sub-component.
-            out2 = out1
+        #out2, attn_weights_block2 = None, None
+        #if enc_output is not None: # i.e. run through as normal.
+        #    attn2, attn_weights_block2 = self.mha2(enc_output, enc_output, out1, nm_inp_gating=None, mask=mha2_mask)
+        #    attn2 = self.dropout2(attn2, training=training)
+        #    out2 = self.layernorm2(out1 + attn2)
+        #else: # skip this attention sub-component.
+        #    out2 = out1
 
-        out3 = self.ffn(out2)
-        out3 = self.dropout3(out3, training=training)
-        out3 = self.layernorm3(out2 + out3)
+        out2 = self.ffn(out1) # change to out2 instead of out1 if take input from the encoder. 
+        out2 = self.dropout2(out2, training=training)
+        out2 = self.layernorm2(out1 + out2)
 
         if nm_inp_gating_eol is not None:
             assert self.nm_eol, f"If nm_inp_gating_eol is not None, then nm_eol should be set to True, got {self.nm_eol}!"
             nm_inp_gating_eol = tf.math.sigmoid(nm_inp_gating_eol)
-            out3 = nm_inp_gating_eol * out3
+            out2 = nm_inp_gating_eol * out2
 
-        return out3, attn_weights_block1, attn_weights_block2
+        return out2, attn_weights_block1
 
 class Decoder(tf.keras.layers.Layer):
     '''
@@ -182,13 +178,12 @@ class Decoder(tf.keras.layers.Layer):
 
         self.dropout = tf.keras.layers.Dropout(rate)
 
-    def call(self, x, enc_output, training, mha1_mask, mha2_mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
+    def call(self, x, training, mha1_mask, mha2_mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
         '''
         Function: call \n
         Description: Overrides the parent class' call function (i.e. run through the decoder). \n
         Input:
             x: (tf.Tensor [int]; [batch_size, max_seq_len(_target)]) Input tensor to the decoder layer. \n
-            enc_output: (tf.Tensor; [batch_size, max_seq_len(_inp), d_model] Encoder output tensor. If None then process without encoder output. \n
             training: (bool) True if Dropout layers are to be in training mode; False otherwise. \n
             mha1_mask: (tf.Tensor) Mask for multi-head attention layer 1. \n
             mha2_mask: (tf.Tensor) Mask for multi-head attention layer 2. \n
@@ -216,16 +211,16 @@ class Decoder(tf.keras.layers.Layer):
         attention_weights = dict()
         if self.mode == "n_layers":
             for i in range(self.num_layers):
-                x, block1, block2 = self.decoder_layers[i](x, enc_output, training, mha1_mask, mha2_mask,
+                x, block1 = self.decoder_layers[i](x, training, mha1_mask, mha2_mask,
                                                            nm_inp_gating_attn, nm_inp_gating_eol)
                 attention_weights[f'decoder_layer{i+1}_block1'] = block1
-                attention_weights[f'decoder_layer{i+1}_block2'] = block2
+                #attention_weights[f'decoder_layer{i+1}_block2'] = block2
             self.reset_counter() # make sure that the counter is 0 for the next time this class is called.
         elif self.mode == "one":
-            x, block1, block2 = self.decoder_layers[i](x, enc_output, training, mha1_mask, mha2_mask,
+            x, block1 = self.decoder_layers[i](x, training, mha1_mask, mha2_mask,
                                                            nm_inp_gating_attn, nm_inp_gating_eol)
             attention_weights[f'decoder_layer{self.counter+1}_block1'] = block1
-            attention_weights[f'decoder_layer{self.counter+1}_block2'] = block2
+            #attention_weights[f'decoder_layer{self.counter+1}_block2'] = block2
             self.increment_counter() # note: when at the final layer, this function resets it.
         else: raise Exception(f"Invalid mode parameter. Got mode: {self.mode}! \n"
                               f"It should be equal to \"n_layers\" or \"one\"!")
@@ -249,12 +244,12 @@ if __name__ == "__main__":
     batch_size = 4
 
     x = tf.random.uniform((batch_size, max_seq_len), minval=0, maxval=400)
-    enc_output = tf.random.uniform((batch_size, max_seq_len+1, d_model)) # +1 to test different encoder max_seq_len...
+    #enc_output = tf.random.uniform((batch_size, max_seq_len+1, d_model)) # +1 to test different encoder max_seq_len...
     training = True
     mha1_mask, mha2_mask = None, None
     nm_inp_gating_attn = tf.random.uniform((batch_size, max_seq_len+2, max_seq_len+2))
     nm_inp_gating_eol = tf.random.uniform((batch_size, max_seq_len, d_model))
-    output, attn_weights = dec(x, enc_output, training, mha1_mask, mha2_mask,
+    output, attn_weights = dec(x, training, mha1_mask, mha2_mask,
                                                            nm_inp_gating_attn, nm_inp_gating_eol)
 
     print(f"output: {output} \n"
