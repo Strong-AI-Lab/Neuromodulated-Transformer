@@ -2,7 +2,7 @@
 File name: NMEncoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 08/07/21
+Data last modified: 15/07/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -16,6 +16,7 @@ sys.path.append("..")
 from models.MultiHeadAttention import MultiHeadAttention
 from models.FeedForwardNetwork import * #FeedForwardNetwork
 from models.PositionEncoding import get_angles, positional_encoding
+from models.Encoder import EncoderLayer
 
 class NMEncoderLayer(tf.keras.layers.Layer):
     '''
@@ -33,7 +34,6 @@ class NMEncoderLayer(tf.keras.layers.Layer):
             and layer normalization.
     '''
     def __init__(self, d_model, num_heads, dff, max_seq_len, rate=0.1):
-        #TODO: note that this may be similar to EncoderLayer, the differences may be done in the NMEncoder class (i.e. the additional layers at the end.)
         '''
         Function: __init__ \n
         Description: Initializes a neuromodulation encoder layer with the passed parameters. \n
@@ -72,7 +72,7 @@ class NMEncoderLayer(tf.keras.layers.Layer):
         '''
         assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
-        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=nm_inp_gating_attn, mask=mask)
+        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=None, mask=mask)
         attn1 = self.dropout1(attn1, training=training)
         out1 = self.layernorm1(x + attn1)
 
@@ -86,7 +86,7 @@ class NMEncoder(tf.keras.layers.Layer):
     '''
     Class: NMEncoder \n
     Description: Implementation of the neuromodulation encoder in a transformer. \n
-    Attributes:
+    Attributes: todo update these below.
         num_layers: (int) The number of layers of the encoder (i.e. number of encoder layers). \n
         d_model: (int) The dimension of the encoder|transformer. \n
         max_seq_len: (int) The maximum sequence length of the input. (always pad to this length) \n
@@ -100,7 +100,7 @@ class NMEncoder(tf.keras.layers.Layer):
             has been applied.
     '''
     def __init__(self, num_layers, d_model, num_heads, dff, max_seq_len, input_vocab_size, max_position_encoding=10000,
-                 rate=0.1, parallel_layers={}, restrictions=None):
+                 rate=0.1, parallel_layers={}):
         '''
         Function: __init__ \n
         Description: Initialization of the encoder class. \n
@@ -115,20 +115,14 @@ class NMEncoder(tf.keras.layers.Layer):
                 It should greater than max_seq_len. Defaults to 10000. \n
             rate: (float) The dropout rate for dropout layers throughout the layer.
                 Defaults to 0.1. \n
-            parallel_layers: (dict) Dictionary containing layer names, and the pre-initialized layer.
+            parallel_layers: (dict) Dictionary containing layer names, and the Layer name to initialize.
                 sample layer:
                     {
-                    "nm_gate_attention": e.g. DecoderLayer
-                    "nm_gate_eol": e.g. EncoderLayer
-                    }
-                Valid keys include nm_gate_attention_lm, nm_gate_eol_lm, nm_gate_attention, nm_gate_eol, + metacognition_layers...
-            restrictions: (dict) A set of restrictions for certain auxiliary tokens.
-                example:
-                    {
-                    "<dec>": [<aoint>,...] # this means that if <dec> then don't process the layer that corresponds to metacognition for the aoint.
+                    "nm_gate_attention": "init_attn_gate_ffn" # Here is a feed forward network to initialize the layer with.
+                    "nm_gate_eol": "init_vanilla_ffn"
                     }
         '''
-        super(Encoder, self).__init__()
+        super(NMEncoder, self).__init__()
 
         assert max_position_encoding >= max_seq_len, f"The max_position_encoding ({max_position_encoding}) should be" \
                                                      f"greater than max_seq_len ({max_seq_len})!"
@@ -144,31 +138,39 @@ class NMEncoder(tf.keras.layers.Layer):
         self.embedding = tf.keras.layers.Embedding(input_vocab_size, d_model)
         self.pos_encoding = positional_encoding(max_position_encoding, d_model)
 
-        self.encoder_layers = [EncoderLayer(d_model, num_heads, dff, max_seq_len,
-                                            rate, nm_attn, nm_eol) for _ in range(num_layers)]
+        self.encoder_layers = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len,
+                                            rate) for _ in range(num_layers)]
 
         self.dropout = tf.keras.layers.Dropout(rate)
 
-        self.parallel_layers = parallel_layers # Parallel layers at the end of self.encoder_layers output (i.e. after they all have been processed).
-        self.valid_names = [
-                            "nm_attn_gate_lm",
-                            "nm_eol_gate_lm",
-                            "nm_attn_gate",
-                            "nm_eol_gate",
-                            "unk_reading_strategy",
-                            "highlighting_reading_strategy",
-                            "aoi_reading_strategy",
-                            "re_read_reading_strategy",
-                            "paraphrase_reading_strategy",
-                            "summarization_reading_strategy"
-                            ]
+        self.parallel_layers = {}
 
-        if restrictions is None:
-            self.restrictions = restrictions
-        else:
-            self.restrictions = None # TODO baseline restrictions I will initialize myself, they will always be initialized if they are None.
+        for key, layer in parallel_layers.items():
+            if layer == "EncoderLayer":
+                self.parallel_layers[key] = NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate)
+            elif layer == "NMEncoderLayerNoRC":
+                self.parallel_layers[key] = NMEncoderLayerNoRC(d_model, num_heads, dff, max_seq_len, rate)
+            elif layer == "GateLayerAttn":
+                self.parallel_layers[key] = GateLayerAttn(d_model, num_heads, dff, max_seq_len, rate)
+            elif layer == "MetacognitionSequenceLayer":
+                self.parallel_layers[key] = MetacognitionSequenceLayer(d_model, num_heads, dff, max_seq_len, rate)
+            elif layer == "MetacognitionSingleLayer":
+                self.parallel_layers[key] = MetacognitionSingleLayer(d_model, num_heads, dff, max_seq_len, rate)
 
-    def call(self, x, training, mask, aux_tokens):
+        #self.valid_names = [
+        #                    "nm_attn_gate_lm",
+        #                    "nm_eol_gate_lm",
+        #                    "nm_attn_gate",
+        #                    "nm_eol_gate",
+        #                    "unk_reading_strategy",
+        #                    "highlighting_reading_strategy",
+        #                    "aoi_reading_strategy",
+        #                    "re_read_reading_strategy",
+        #                    "paraphrase_reading_strategy",
+        #                    "summarization_reading_strategy"
+        #                    ]
+
+    def call(self, x, training, mask, restrictions=[]):
         '''
         Function: call \n
         Description: Overrides the parent class' call function (i.e. run through the encoder). \n
@@ -176,10 +178,10 @@ class NMEncoder(tf.keras.layers.Layer):
             x: (tf.Tensor [int]; [batch_size, max_seq_len(_input)]) Input tensor to the decoder layer. \n
             training: (bool) True if Dropout layers are to be in training mode; False otherwise. \n
             mask: (tf.Tensor) Mask for multi-head attention layer 1. \n
-            aux_tokens: (list; string) List of the auxiliary tokens in the current input. Used for checking restrictions.
+            restrictions: (list; string) List of the last layer names which are not to be computed.
         Return:
-            x_dict: (dict; tf.Tensor; [batch_size, varies, varies]) \n
-            attention_weights: (dict; tf.Tensor; [batch_size, num_heads, max_seq_len, max_seq_len])
+            x_dict: (dict; tuple; tf.Tensor; [batch_size, varies, varies] (output from a layer) | tf.Tensor;
+                [batch_size, num_heads, max_seq_len, max_seq_len] (attention weights for that layer) or dict of tensors of this shape) \n
         '''
         assert x.shape[1] == self.max_seq_len, f"The tensor x should have a dimension 1 (python indices) size of {self.max_seq_len}." \
                                            f"Got {x.shape[1]} instead!"
@@ -197,11 +199,11 @@ class NMEncoder(tf.keras.layers.Layer):
         attention_weights = dict()
         if self.mode == "n_layers":
             for i in range(self.num_layers):
-                x, block1 = self.encoder_layers[i](x, training, mask, nm_inp_gating_attn, nm_inp_gating_eol)
+                x, block1 = self.encoder_layers[i](x, training, mask)
                 attention_weights[f'decoder_layer{i + 1}_block1'] = block1
             self.reset_counter()  # make sure that the counter is 0 for the next time this class is called.
         elif self.mode == "one":
-            x, block1 = self.encoder_layers[i](x, training, mask, nm_inp_gating_attn, nm_inp_gating_eol)
+            x, block1 = self.encoder_layers[i](x, training, mask)
             attention_weights[f'decoder_layer{self.counter + 1}_block1'] = block1
             self.increment_counter()  # note: when at the final layer, this function resets it.
         else:
@@ -209,20 +211,11 @@ class NMEncoder(tf.keras.layers.Layer):
                             f"It should be equal to \"n_layers\" or \"one\"!")
         x_dict = dict()
         if self.counter == 0: # i.e. we are at the end and it has been reset to zero.
-            for key, value in self.parallel_layers.items():
-                if not check_restrictions(key, aux_tokens): continue
-                x_dict[key] = value(x, training, mask) # TODO when initializeing the layers, make sure their call has no nm_inp...
-            if len(x_dict.keys()) == 0: x_dict["default"] = x # i.e. return x if the dictionary is empty.
-        return x_dict, attention_weights
-
-    def check_restrictions(self, key, aux_tok): # TODO need a better way to do this...
-        if key not in self.valid_names: return False # the key (layer name) needs to be a valid name as defined during initialization.
-        for k, v in self.restrictions.items(): # iterate though each key:(list)
-            if k in aux_tok: # if k is an auxiliary token in the current input then check restrictions.
-                for restr in v: # for each restriction in v if it is equal to key, then return False as the key can't be equal to this restriction.
-                    if restr == key: return False
-        return True
-
+            for key, layer in self.parallel_layers.items():
+                if key in restrictions: continue
+                x_dict[key] = layer(x, training, mask) # this will be a tuple containing the output (x, attn_weights)
+            if len(x_dict.keys()) == 0: x_dict["default"] = (x, attention_weights) # i.e. return x if the dictionary is empty.
+        return x_dict
 
     def increment_counter(self):
         self.counter += 1
@@ -231,3 +224,301 @@ class NMEncoder(tf.keras.layers.Layer):
 
     def reset_counter(self):
         self.counter = 0
+
+class NMEncoderLayerNoRC(tf.keras.layers.Layer):
+    '''
+    Class: NMEncoderLayerNoRC \n
+    Description: Implementation of a neuromodulation encoder layer with the last residual connection removed. \n
+    Attributes:
+        max_seq_len: (int) The maximum sequence length of the input. (always pad to this length) \n
+        mha: Multi-head attention (attends solely to itself). \n
+        ffn: Feed forward network. \n
+        layernorm1: Layernormalization layer, occuring after the multi-head attention layer (mha). \n
+        layernorm2: Layernormalization layer, occuring after the feed-forward network (ffn). \n
+        dropout1: Dropout layer which occurs after the multi-head attention layer and before the residual connection
+            and layer normalization. \n
+        dropout2: Dropout layer which occurs after the feed-forward layer and before the residual connection
+            and layer normalization.
+    '''
+    def __init__(self, d_model, num_heads, dff, max_seq_len, rate=0.1):
+        '''
+        Function: __init__ \n
+        Description: Initializes a neuromodulation encoder layer with the passed parameters. \n
+        Input:
+            d_model: (int) The dimension of the transformer layer. \n
+            num_heads: (int) The number of heads in the multi-head attention component. \n
+            dff: (int) The dimension of the feed forward network layer. \n
+            max_seq_len: (int) The maximum sequence length to be passed as input. \n
+            rate: (float) The dropout rate for dropout layers throughout the layer.
+                Defaults to 0.1. \n
+        '''
+        super(NMEncoderLayerNoRC, self).__init__()
+
+        self.max_seq_len = max_seq_len
+
+        self.mha = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
+        self.ffn = FeedForwardNetwork(init_vanilla_ffn(d_model, dff))
+
+        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.
+        #self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for feed forward network.
+
+        self.dropout1 = tf.keras.layers.Dropout(rate)
+        self.dropout2 = tf.keras.layers.Dropout(rate)
+
+    def call(self, x, training, mask):
+        '''
+        Function: call \n
+        Description: Overrides parent class's call function (i.e. one run through EncoderLayer). \n
+        Input:
+            x: (tf.Tensor; [batch_size, max_seq_len(_target), d_model]) Input tensor to the decoder layer. \n
+            training: (bool) True if Dropout layers are to be in training mode; False otherwise. \n
+            mask: (tf.Tensor) Mask for the multi-head attention layer. \n
+        Return:
+            out2: (tf.Tensor; [batch_size, max_seq_len, d_model])
+            attn_weights: (tf.Tensor; [batch_size, num_heads, (max_)seq_len, (max_)seq_len])
+        '''
+        assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
+
+        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=None, mask=mask)
+        attn1 = self.dropout1(attn1, training=training)
+        out1 = self.layernorm1(x + attn1)
+
+        out2 = self.ffn(out1)
+        out2 = self.dropout2(out2, training=training) # allowed here unlike other layers.
+        #out2 = self.layernorm2(out2)
+
+        return out2, attn_weights
+
+class GateLayerAttn(tf.keras.layers.Layer):
+    '''
+    Class: GateLayerAttn \n
+    Description: Implementation of an encoder layer with the gated supported feed-forward network (for attn). \n
+    Attributes:
+        max_seq_len: (int) The maximum sequence length of the input. (always pad to this length) \n
+        mha: Multi-head attention (attends solely to itself). \n
+        ffn: Feed forward network. \n
+        layernorm1: Layernormalization layer, occuring after the multi-head attention layer (mha). \n
+        layernorm2: Layernormalization layer, occuring after the feed-forward network (ffn). \n
+        dropout1: Dropout layer which occurs after the multi-head attention layer and before the residual connection
+            and layer normalization. \n
+        dropout2: Dropout layer which occurs after the feed-forward layer and before the residual connection
+            and layer normalization.
+    '''
+    def __init__(self, d_model, num_heads, dff, max_seq_len, rate=0.1):
+        '''
+        Function: __init__ \n
+        Description: Initializes a neuromodulation encoder layer with the passed parameters. \n
+        Input:
+            d_model: (int) The dimension of the transformer layer. \n
+            num_heads: (int) The number of heads in the multi-head attention component. \n
+            dff: (int) The dimension of the feed forward network layer. \n
+            max_seq_len: (int) The maximum sequence length to be passed as input. \n
+            rate: (float) The dropout rate for dropout layers throughout the layer.
+                Defaults to 0.1. \n
+        '''
+        super(GateLayerAttn, self).__init__()
+
+        self.max_seq_len = max_seq_len
+
+        self.mha = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
+        self.ffn = FeedForwardNetwork(init_attn_gate_ffn(dff, max_seq_len))
+
+        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.
+        #self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for feed forward network.
+
+        self.dropout1 = tf.keras.layers.Dropout(rate)
+        #self.dropout2 = tf.keras.layers.Dropout(rate)
+
+    def call(self, x, training, mask):
+        '''
+        Function: call \n
+        Description: Overrides parent class's call function (i.e. one run through EncoderLayer). \n
+        Input:
+            x: (tf.Tensor; [batch_size, max_seq_len(_target), d_model]) Input tensor to the decoder layer. \n
+            training: (bool) True if Dropout layers are to be in training mode; False otherwise. \n
+            mask: (tf.Tensor) Mask for the multi-head attention layer. \n
+        Return:
+            out2: (tf.Tensor; [batch_size, max_seq_len, d_model])
+            attn_weights: (tf.Tensor; [batch_size, num_heads, (max_)seq_len, (max_)seq_len])
+        '''
+        assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
+
+        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=None, mask=mask)
+        attn1 = self.dropout1(attn1, training=training)
+        out1 = self.layernorm1(x + attn1)
+
+        out2 = self.ffn(out1)
+        # residual and dropout removed here as never want these values to equal 0 and the residual connection modifies the dimenisons.
+
+        return out2, attn_weights
+
+class MetacognitionSequenceLayer(tf.keras.layers.Layer):
+    '''
+    Class: MetacognitionSequenceLayer \n
+    Description: Implementation of an encoder layer with the metacognition sequence feed-forward network. \n
+    Attributes:
+        max_seq_len: (int) The maximum sequence length of the input. (always pad to this length) \n
+        mha: Multi-head attention (attends solely to itself). \n
+        ffn: Feed forward network. \n
+        layernorm1: Layernormalization layer, occuring after the multi-head attention layer (mha). \n
+        layernorm2: Layernormalization layer, occuring after the feed-forward network (ffn). \n
+        dropout1: Dropout layer which occurs after the multi-head attention layer and before the residual connection
+            and layer normalization. \n
+        dropout2: Dropout layer which occurs after the feed-forward layer and before the residual connection
+            and layer normalization.
+    '''
+    def __init__(self, d_model, num_heads, dff, max_seq_len, rate=0.1):
+        '''
+        Function: __init__ \n
+        Description: Initializes a neuromodulation encoder layer with the passed parameters. \n
+        Input:
+            d_model: (int) The dimension of the transformer layer. \n
+            num_heads: (int) The number of heads in the multi-head attention component. \n
+            dff: (int) The dimension of the feed forward network layer. \n
+            max_seq_len: (int) The maximum sequence length to be passed as input. \n
+            rate: (float) The dropout rate for dropout layers throughout the layer.
+                Defaults to 0.1. \n
+        '''
+        super(MetacognitionSequenceLayer, self).__init__()
+
+        self.max_seq_len = max_seq_len
+
+        self.mha = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
+        self.ffn = FeedForwardNetwork(init_metacognition_sequence_ffn(dff))
+
+        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.
+        #self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for feed forward network.
+
+        self.dropout1 = tf.keras.layers.Dropout(rate)
+        #self.dropout2 = tf.keras.layers.Dropout(rate)
+
+    def call(self, x, training, mask):
+        '''
+        Function: call \n
+        Description: Overrides parent class's call function (i.e. one run through EncoderLayer). \n
+        Input:
+            x: (tf.Tensor; [batch_size, max_seq_len(_target), d_model]) Input tensor to the decoder layer. \n
+            training: (bool) True if Dropout layers are to be in training mode; False otherwise. \n
+            mask: (tf.Tensor) Mask for the multi-head attention layer. \n
+        Return:
+            out2: (tf.Tensor; [batch_size, max_seq_len, d_model])
+            attn_weights: (tf.Tensor; [batch_size, num_heads, (max_)seq_len, (max_)seq_len])
+        '''
+        assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
+
+        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=None, mask=mask)
+        attn1 = self.dropout1(attn1, training=training)
+        out1 = self.layernorm1(x + attn1)
+
+        out2 = self.ffn(out1)
+        # residual and dropout removed here as never want these values to equal 0 and the residual connection modifies the dimenisons.
+
+        return out2, attn_weights
+
+class MetacognitionSingleLayer(tf.keras.layers.Layer):
+    '''
+    Class: MetacognitionSingleLayer \n
+    Description: Implementation of an encoder layer with the metacognition single feed-forward network. \n
+    Attributes:
+        max_seq_len: (int) The maximum sequence length of the input. (always pad to this length) \n
+        mha: Multi-head attention (attends solely to itself). \n
+        ffn: Feed forward network. \n
+        layernorm1: Layernormalization layer, occuring after the multi-head attention layer (mha). \n
+        layernorm2: Layernormalization layer, occuring after the feed-forward network (ffn). \n
+        dropout1: Dropout layer which occurs after the multi-head attention layer and before the residual connection
+            and layer normalization. \n
+        dropout2: Dropout layer which occurs after the feed-forward layer and before the residual connection
+            and layer normalization.
+    '''
+
+    def __init__(self, d_model, num_heads, dff, max_seq_len, rate=0.1):
+        '''
+        Function: __init__ \n
+        Description: Initializes a neuromodulation encoder layer with the passed parameters. \n
+        Input:
+            d_model: (int) The dimension of the transformer layer. \n
+            num_heads: (int) The number of heads in the multi-head attention component. \n
+            dff: (int) The dimension of the feed forward network layer. \n
+            max_seq_len: (int) The maximum sequence length to be passed as input. \n
+            rate: (float) The dropout rate for dropout layers throughout the layer.
+                Defaults to 0.1. \n
+        '''
+        super(MetacognitionSingleLayer, self).__init__()
+
+        self.max_seq_len = max_seq_len
+
+        self.mha = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
+        self.ffn = FeedForwardNetwork(init_metacognition_single_ffn(dff))
+
+        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.
+        #self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for feed forward network.
+
+        self.dropout1 = tf.keras.layers.Dropout(rate)
+        #self.dropout2 = tf.keras.layers.Dropout(rate)
+
+    def call(self, x, traMetacognitionSingleLayerining, mask):
+        '''
+        Function: call \n
+        Description: Overrides parent class's call function (i.e. one run through EncoderLayer). \n
+        Input:
+            x: (tf.Tensor; [batch_size, max_seq_len(_target), d_model]) Input tensor to the decoder layer. \n
+            training: (bool) True if Dropout layers are to be in training mode; False otherwise. \n
+            mask: (tf.Tensor) Mask for the multi-head attention layer. \n
+        Return:
+            out2: (tf.Tensor; [batch_size, max_seq_len, d_model])
+            attn_weights: (tf.Tensor; [batch_size, num_heads, (max_)seq_len, (max_)seq_len])
+        '''
+        assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
+
+        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=None, mask=mask)
+        attn1 = self.dropout1(attn1, training=training)
+        out1 = self.layernorm1(x + attn1)
+
+        out2 = self.ffn(out1)
+        # residual and dropout removed here as never want these values to equal 0 and the residual connection modifies the dimenisons.
+
+        return out2, attn_weights
+
+if __name__ == "__main__":
+    num_layers, d_model, num_heads, dff, max_seq_len, input_vocab_size, max_position_encoding, rate = 6, 100, 10, 200, 6, 124, 1007, 0.1
+    batch_size = 2
+    # num_layers, d_model, num_heads, dff, max_seq_len, input_vocab_size, max_position_encoding=10000,
+    #                  rate=0.1, parallel_layers={}
+    #                    "nm_attn_gate_lm",
+    #                    "nm_eol_gate_lm",
+    #                    "unk_reading_strategy",
+    #                    "highlighting_reading_strategy",
+    #                    "aoi_reading_strategy",
+    #                    "re_read_reading_strategy",
+    #                    "paraphrase_reading_strategy",
+    #                    "summarization_reading_strategy"
+    # MetacognitionSingleLayer
+    # MetacognitionSequenceLayer
+    # GateLayerAttn
+    # NMEncoderLayer
+    parallel_layers = {}
+    parallel_layers["nm_attn_gate_lm"] = "GateLayerAttn"
+    parallel_layers["nm_eol_gate_lm"] = "NMEncoderLayerNoRC" #"EncoderLayer"
+    parallel_layers["unk_reading_strategy"] = "MetacognitionSequenceLayer"
+    parallel_layers["highlighting_reading_strategy"] = "MetacognitionSingleLayer"
+    parallel_layers["aoi_reading_strategy"] = "MetacognitionSingleLayer"
+    parallel_layers["re_read_reading_strategy"] = "MetacognitionSingleLayer"
+    parallel_layers["paraphrase_reading_strategy"] = "MetacognitionSingleLayer"
+    parallel_layers["summarization_reading_strategy"] = "MetacognitionSingleLayer"
+
+    nm_encoder = NMEncoder(num_layers, d_model, num_heads, dff, max_seq_len, input_vocab_size,
+                           max_position_encoding, rate, parallel_layers)
+    nm_encoder.mode = "n_layers"
+    # x, training, mask, restrictions=[]
+    x = tf.random.uniform((batch_size, max_seq_len))
+    training, mask = True, None
+    restrictions = ["unk_reading_strategy"]
+    dict_ = nm_encoder(x, training, mask, restrictions)
+    print(len(dict_.keys()))
+    #print(dict_)
+    for key, value in dict_.items():
+        print(f"{key}: {value[0].shape} \t {value[1].shape}")
+
+    print(f"nm_attn_gate_lm: {dict_['nm_attn_gate_lm'][0]}")
+    print(f"unk: {dict_['unk_reading_strategy'][0]}")
+    print(f"highlighting: {dict_['paraphrase_reading_strategy'][0]}")

@@ -2,7 +2,7 @@
 File name: Encoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 08/07/21
+Data last modified: 15/07/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -65,6 +65,9 @@ class EncoderLayer(tf.keras.layers.Layer):
         self.dropout1 = tf.keras.layers.Dropout(rate)
         self.dropout2 = tf.keras.layers.Dropout(rate)
 
+        if self.nm_eol:
+            self.dense_eol = tf.keras.layers.Dense(d_model, activation='sigmoid')
+
     def call(self, x, training, mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
         '''
         Function: call \n
@@ -96,7 +99,7 @@ class EncoderLayer(tf.keras.layers.Layer):
 
         if nm_inp_gating_eol is not None:
             assert self.nm_eol, f"If nm_inp_gating_eol is not None, then nm_eol should be set to True, got {self.nm_eol}!"
-            nm_inp_gating_eol = tf.math.sigmoid(nm_inp_gating_eol)
+            nm_inp_gating_eol = self.dense_eol(nm_inp_gating_eol[:,-self.max_seq_len:,:]) #tf.math.sigmoid(nm_inp_gating_eol)
             out2 = nm_inp_gating_eol * out2
 
         return out2, attn_weights
@@ -226,7 +229,7 @@ if __name__ == "__main__":
     training = True
     mask = None
     nm_inp_gating_attn = tf.random.uniform((batch_size, max_seq_len + 2, max_seq_len + 2))
-    nm_inp_gating_eol = tf.random.uniform((batch_size, max_seq_len, d_model))
+    nm_inp_gating_eol = tf.random.uniform((batch_size, max_seq_len+1, d_model))
     output, attn_weights = enc(x, training, mask, nm_inp_gating_attn, nm_inp_gating_eol)
 
     print(f"output: {output} \n"

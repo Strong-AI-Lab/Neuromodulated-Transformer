@@ -2,7 +2,7 @@
 File name: FeedForwardNetwork.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 05/07/21
+Data last modified: 14/07/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
