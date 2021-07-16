@@ -2,7 +2,7 @@
 File name: Decoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 15/07/21
+Data last modified: 16/07/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -26,7 +26,7 @@ class DecoderLayer(tf.keras.layers.Layer):
         nm_attn: (bool) If we are to gate in a context dependant manner during the calculation of attention. \n
         nm_eol: (bool) If we are to gate in a context dependant manner at the end of each layer. \n
         mha1: Multi-head attention 1 (no encoder influence; attends solely to itself). \n
-        mha2: Multi-head attention 1 (encoder influence; attends the decoder's input to the encoder's output). \n
+        mha2: (NOTE: has been removed) Multi-head attention 1 (encoder influence; attends the decoder's input to the encoder's output). \n
         ffn: Feed forward network. \n
         layernorm1: Layernormalization layer, occuring after the first multi-head attention layer (mha1). \n
         layernorm2: Layernormalization layer, occuring after the feed-forward-network (ffn). \n
@@ -75,15 +75,14 @@ class DecoderLayer(tf.keras.layers.Layer):
         if self.nm_eol:
             self.dense_eol = tf.keras.layers.Dense(d_model, activation='sigmoid')
 
-    def call(self, x, training, mha1_mask, mha2_mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
+    def call(self, x, training, mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
         '''
         Function: call \n
         Description: Overrides parent class's call function (i.e. one run through DecoderLayer). \n
         Input:
             x: (tf.Tensor; [batch_size, max_seq_len(_target), d_model]) Input tensor to the decoder layer. \n
             training: (bool) True if Dropout layers are to be in training mode; False otherwise. \n
-            mha1_mask: (tf.Tensor) Mask for multi-head attention layer 1. \n
-            mha2_mask: (tf.Tensor) Mask for multi-head attention layer 2. \n
+            mask: (tf.Tensor) Mask for the multi-head attention layer. \n
             nm_inp_gating_attn: (tf.Tensor; [batch_size, nm_max_seq_len, nm_max_seq_len]) Context dependant gating tensor (in logit form) from the neuromodulated encoder for attn weights. \n
             nm_inp_gating_eol: (tf.Tensor; [batch_size, max_seq_len, d_model] Context dependant gating tensor (in logit form) from the neuromodulated encoder for end of layer (eol) gating.
         Return:
@@ -98,7 +97,7 @@ class DecoderLayer(tf.keras.layers.Layer):
             nm_inp_gating_attn = nm_inp_gating_attn[:,-x.shape[1]:, -x.shape[1]:] # remove global_auxiliary tokens.
         else: assert not self.nm_attn, f"If nm_inp_gating_attn is None then, nm_attn should be set to False, got {self.nm_attn}"
 
-        attn1, attn_weights_block1 = self.mha1(x, x, x, nm_inp_gating=nm_inp_gating_attn, mask=mha1_mask)
+        attn1, attn_weights_block1 = self.mha1(x, x, x, nm_inp_gating=nm_inp_gating_attn, mask=mask)
         attn1 = self.dropout1(attn1, training=training)
         out1 = self.layernorm1(x + attn1)
 
@@ -181,15 +180,14 @@ class Decoder(tf.keras.layers.Layer):
 
         self.dropout = tf.keras.layers.Dropout(rate)
 
-    def call(self, x, training, mha1_mask, mha2_mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
+    def call(self, x, training, mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
         '''
         Function: call \n
         Description: Overrides the parent class' call function (i.e. run through the decoder). \n
         Input:
             x: (tf.Tensor [int]; [batch_size, max_seq_len(_target)]) Input tensor to the decoder layer. \n
             training: (bool) True if Dropout layers are to be in training mode; False otherwise. \n
-            mha1_mask: (tf.Tensor) Mask for multi-head attention layer 1. \n
-            mha2_mask: (tf.Tensor) Mask for multi-head attention layer 2. \n
+            mask: (tf.Tensor) Mask for the multi-head attention layer. \n
             nm_inp_gating_attn: (tf.Tensor; [batch_size, nm_max_seq_len, nm_max_seq_len]) Context dependant gating tensor (in logit form) from the neuromodulated encoder for attn weights. \n
             nm_inp_gating_eol: (tf.Tensor; [batch_size, max_seq_len, d_model] Context dependant gating tensor (in logit form) from the neuromodulated encoder for end of layer (eol) gating.
         Return:
@@ -214,13 +212,13 @@ class Decoder(tf.keras.layers.Layer):
         attention_weights = dict()
         if self.mode == "n_layers":
             for i in range(self.num_layers):
-                x, block1 = self.decoder_layers[i](x, training, mha1_mask, mha2_mask,
+                x, block1 = self.decoder_layers[i](x, training, mask,
                                                            nm_inp_gating_attn, nm_inp_gating_eol)
                 attention_weights[f'decoder_layer{i+1}_block1'] = block1
                 #attention_weights[f'decoder_layer{i+1}_block2'] = block2
             self.reset_counter() # make sure that the counter is 0 for the next time this class is called.
         elif self.mode == "one":
-            x, block1 = self.decoder_layers[i](x, training, mha1_mask, mha2_mask,
+            x, block1 = self.decoder_layers[i](x, training, mask,
                                                            nm_inp_gating_attn, nm_inp_gating_eol)
             attention_weights[f'decoder_layer{self.counter+1}_block1'] = block1
             #attention_weights[f'decoder_layer{self.counter+1}_block2'] = block2
@@ -249,11 +247,10 @@ if __name__ == "__main__":
     x = tf.random.uniform((batch_size, max_seq_len), minval=0, maxval=400)
     #enc_output = tf.random.uniform((batch_size, max_seq_len+1, d_model)) # +1 to test different encoder max_seq_len...
     training = True
-    mha1_mask, mha2_mask = None, None
+    mask = None
     nm_inp_gating_attn = tf.random.uniform((batch_size, max_seq_len+2, max_seq_len+2))
     nm_inp_gating_eol = tf.random.uniform((batch_size, max_seq_len+2, d_model))
-    output, attn_weights = dec(x, training, mha1_mask, mha2_mask,
-                                                           nm_inp_gating_attn, nm_inp_gating_eol)
+    output, attn_weights = dec(x, training, mask, nm_inp_gating_attn, nm_inp_gating_eol)
 
     print(f"output: {output} \n"
           f"output.shape: {output.shape}")

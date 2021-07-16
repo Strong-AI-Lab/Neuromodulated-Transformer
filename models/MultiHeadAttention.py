@@ -55,7 +55,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
         self.nm_gate_logits = None
         if self.nm_gating:
-            self.nm_gate_logits = [tf.keras.layers.Dense(self.max_seq_len) for _ in range(num_heads)]
+            self.nm_gate_logits = [tf.keras.layers.Dense(self.max_seq_len) for _ in range(num_heads)] # TODO: is a single dense layer sufficient?
 
         self.dense = tf.keras.layers.Dense(d_model)
 

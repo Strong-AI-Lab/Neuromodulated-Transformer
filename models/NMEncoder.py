@@ -86,7 +86,7 @@ class NMEncoder(tf.keras.layers.Layer):
     '''
     Class: NMEncoder \n
     Description: Implementation of the neuromodulation encoder in a transformer. \n
-    Attributes: todo update these below.
+    Attributes: todo update below.
         num_layers: (int) The number of layers of the encoder (i.e. number of encoder layers). \n
         d_model: (int) The dimension of the encoder|transformer. \n
         max_seq_len: (int) The maximum sequence length of the input. (always pad to this length) \n

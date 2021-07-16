@@ -39,7 +39,7 @@ def init_attn_gate_ffn(dff, seq_len):
     '''
     return tf.keras.Sequential([
         tf.keras.layers.Dense(dff, activation='relu'),
-        tf.keras.layers.Dense(seq_len, activation=None)
+        tf.keras.layers.Dense(seq_len, activation=None) # TODO: is an actual activation here required or should one be put here?
     ])
 
 def init_metacognition_sequence_ffn(dff):
