@@ -13,7 +13,7 @@ import numpy as np
 import sys
 sys.path.append("..")
 
-from models.MultiHeadAttention import MultiHeadAttention
+from models.NMMultiHeadAttention import NMMultiHeadAttention
 from models.FeedForwardNetwork import * #FeedForwardNetwork
 from models.PositionEncoding import get_angles, positional_encoding
 from models.Encoder import EncoderLayer
@@ -49,7 +49,7 @@ class NMEncoderLayer(tf.keras.layers.Layer):
 
         self.max_seq_len = max_seq_len
 
-        self.mha = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
+        self.mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
         self.ffn = FeedForwardNetwork(init_vanilla_ffn(d_model, dff))
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.
@@ -256,7 +256,7 @@ class NMEncoderLayerNoRC(tf.keras.layers.Layer):
 
         self.max_seq_len = max_seq_len
 
-        self.mha = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
+        self.mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
         self.ffn = FeedForwardNetwork(init_vanilla_ffn(d_model, dff))
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.
@@ -320,7 +320,7 @@ class GateLayerAttn(tf.keras.layers.Layer):
 
         self.max_seq_len = max_seq_len
 
-        self.mha = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
+        self.mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
         self.ffn = FeedForwardNetwork(init_attn_gate_ffn(dff, max_seq_len))
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.
@@ -383,7 +383,7 @@ class MetacognitionSequenceLayer(tf.keras.layers.Layer):
 
         self.max_seq_len = max_seq_len
 
-        self.mha = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
+        self.mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
         self.ffn = FeedForwardNetwork(init_metacognition_sequence_ffn(dff))
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.
@@ -447,7 +447,7 @@ class MetacognitionSingleLayer(tf.keras.layers.Layer):
 
         self.max_seq_len = max_seq_len
 
-        self.mha = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
+        self.mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
         self.ffn = FeedForwardNetwork(init_metacognition_single_ffn(dff))
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.

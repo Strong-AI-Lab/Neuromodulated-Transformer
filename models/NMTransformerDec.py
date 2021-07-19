@@ -17,7 +17,7 @@ from models.AttentionMasks import *
 from models.Decoder import Decoder, DecoderLayer
 from models.NMEncoder import *
 from models.PositionEncoding import *
-from models.MultiHeadAttention import MultiHeadAttention
+from models.NMMultiHeadAttention import NMMultiHeadAttention
 from models.FeedForwardNetwork import *
 
 class NMTransformerDec(tf.keras.Model):
@@ -57,7 +57,7 @@ class NMTransformerDec(tf.keras.Model):
 
         self.final_layer = tf.keras.layers.Dense(target_vocab_size)
 
-    def call(self, dec_inp, nm_inp, training, padding_id=0, num_aux_tok=0):
+    def call(self, dec_inp, nm_inp, training, padding_id=0, num_aux_tok=0, nm_mask=None, dec_mask=None):
         '''
         Function: call \n
         Description: Description: Overrides the parent class' call function (i.e. run through the transformer). \n
@@ -69,10 +69,9 @@ class NMTransformerDec(tf.keras.Model):
             num_aux_tok: (int) The number of auxiliary tokens in the neuromodulated encoder's input. Defaults to 0. \n
         Return:
         '''
-
-        output_dict = self._run_nm_encoder(nm_inp, training, padding_id, num_aux_tok) # (output, attn_weights) for each key.
+        output_dict = self._run_nm_encoder(nm_inp, training, padding_id, num_aux_tok, nm_mask) # (output, attn_weights) for each key.
         dec_output, attn_weights = self._run_decoder(dec_inp, training, output_dict["nm_attn_gate"][0],
-                                                     output_dict["nm_eol_gate"][0], padding_id)
+                                                     output_dict["nm_eol_gate"][0], padding_id, dec_mask)
 
         final_output = self.final_layer(dec_output)
 
@@ -80,15 +79,14 @@ class NMTransformerDec(tf.keras.Model):
 
 
     # helper function for the call method. Refer to the call function docstring for description of parameters.
-    def _run_nm_encoder(self, nm_inp, training, padding_id, num_aux_tok):
-        # TODO add support for restrictions later when implementing reading strategies.
-        mask = create_combined_mask(nm_inp, padding_id, num_aux_tok)
+    def _run_nm_encoder(self, nm_inp, training, padding_id, num_aux_tok, mask):
+
         self.nm_encoder.mode = "n_layers"
         return self.nm_encoder(nm_inp, training, mask) # this returns a dictionary of the returned values.
 
     # helper function for the call method. Refer to the call function docstring for description of parameters.
-    def _run_decoder(self, dec_inp, training, nm_inp_gating_attn, nm_inp_gating_eol, padding_id):
-        mask = create_combined_mask(dec_inp, padding_id)
+    def _run_decoder(self, dec_inp, training, nm_inp_gating_attn, nm_inp_gating_eol, padding_id, mask):
+
         self.decoder.mode = "n_layers"
         return self.decoder(dec_inp, training, mask, nm_inp_gating_attn=nm_inp_gating_attn,
                             nm_inp_gating_eol=nm_inp_gating_eol)

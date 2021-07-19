@@ -10,7 +10,8 @@ Tensorflow version: 2
 import tensorflow as tf
 import numpy as np
 
-class MultiHeadAttention(tf.keras.layers.Layer):
+# Don't name MultiHeadAttention, otherwise error with training in tensorflow.
+class NMMultiHeadAttention(tf.keras.layers.Layer):
     '''
     Class: MultiHeadAttention \n
     Description: Implementation of the multi-head attention for a transformer layer. \n
@@ -39,7 +40,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
             max_seq_len: (int) The maximum sequence length to be passed as input. \n
             nm_gataing: (bool) True if context dependant gating is to occur; False otherwise. Defaults to False.
         '''
-        super(MultiHeadAttention, self).__init__()
+        super(NMMultiHeadAttention, self).__init__()
         assert d_model % num_heads == 0, f"The number of heads is incompatible with the dimension of the model \n" \
                                          f"d_model: {d_model} \t num_heads: {num_heads}"
 
@@ -201,7 +202,9 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
         # gated_attn_logits.shape == (batch_size, num_heads, max_seq_len, max_seq_len)
 
-        assert scaled_attention_logits.shape == gated_attn_logits.shape, f"The dimensions between scaled_attention_logits ({scaled_attention_logits.shape})" \
+        # Needed for multiple worker strategy for batch size of 0.
+        if not(scaled_attention_logits.shape[2] is None and scaled_attention_logits.shape[3] is None):
+            assert scaled_attention_logits.shape == gated_attn_logits.shape, f"The dimensions between scaled_attention_logits ({scaled_attention_logits.shape})" \
                                                                                 f"and gated_attn_logits ({gated_attn_logits.shape}) doesn't match"
 
         gated_attn_logits = tf.math.sigmoid(gated_attn_logits)
@@ -229,7 +232,7 @@ if __name__ == "__main__":
     mask = None
     nm_inp_gating = tf.random.uniform((batch_size, max_seq_len, max_seq_len))
     q, k, v = q, q, q
-    mha = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating)
+    mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating)
     output, attention = mha(q,k,v,nm_inp_gating,mask)
     print(f"Output.shape: {output.shape} \n"
           f"attention: {attention}")

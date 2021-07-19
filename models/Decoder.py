@@ -13,7 +13,7 @@ import numpy as np
 import sys
 sys.path.append("..")
 
-from models.MultiHeadAttention import MultiHeadAttention
+from models.NMMultiHeadAttention import NMMultiHeadAttention
 from models.FeedForwardNetwork import * #FeedForwardNetwork
 from models.PositionEncoding import get_angles, positional_encoding
 
@@ -59,8 +59,8 @@ class DecoderLayer(tf.keras.layers.Layer):
         self.nm_eol = nm_eol
 
         # d_model, num_heads, max_seq_len, nm_gating=False
-        self.mha1 = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=nm_attn)
-        self.mha2 = MultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False) # restriction here is that it is never gated given a context.
+        self.mha1 = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=nm_attn)
+        self.mha2 = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False) # restriction here is that it is never gated given a context.
 
         self.ffn = FeedForwardNetwork(init_vanilla_ffn(d_model, dff))
 

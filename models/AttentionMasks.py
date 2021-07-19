@@ -51,8 +51,9 @@ def create_look_ahead_mask(size, num_aux_tok):
 
     mask = tf.concat([y, mask], axis=1) # (size-num_aux_tok, size)
     mask = tf.concat([z, mask], axis=0)
-    assert mask.shape[0] == size and mask.shape[1] == size, f"Both dimensions should be ({size},{size})! \n" \
-                                                          f"Got {mask.shape} instead!"
+    # below causes error during training? yes remove it.
+    #assert mask.shape[0] == size and mask.shape[1] == size, f"Both dimensions should be ({size},{size})! \n" \
+    #                                                      f"Got {mask.shape} instead!"
     return mask # (seq_len, seq_len)
 
 def create_combined_mask(x, padding_id=0, num_aux_tok=0):
