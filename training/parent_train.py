@@ -126,8 +126,76 @@ class ParentTrainNL:
 
         return loss, size
 
-    def train_(self, epoch_start, epoch_end, save_filepath_train, save_filepath_val, data_dict, num_aux_tokens):
+    def train_iteration(self, epoch_start, epoch_end, save_filepath_train, save_filepath_val, data_dict, num_aux_tokens):
+        iteration_counter = 0
+        for e in range(epoch_start, epoch_end):
+            start = time.time()
 
+            batch = 0
+            epoch_loss = 0  # sum up all of the losses
+            epoch_size = 0  # then divide by the total number of losses.
+            for (tar_inp, tar_real, nm_inp) in data_dict["train"]:
+
+                iteration_counter += 1 # one iteration is defined to be one batch.
+
+                loss, size = self._distributed_train_step(tar_inp, tar_real, nm_inp, num_aux_tokens)
+                if size == 0:
+                    print(f"The size is zero, skip the current batch, it will not be counted due to an error!")
+                    continue  # start the next batch.
+
+                epoch_loss += loss
+                epoch_size += size
+
+                # loss for the current batch.
+                loss_ = loss / size
+                loss_ = tf.cast(loss_, dtype=tf.dtypes.float32)
+                dict_ = self.perplexity_bpc_function(loss_)
+
+                if "perplexity" in dict_.keys():
+                    perp = dict_["perplexity"]
+                if "bpc" in dict_.keys():
+                    bpc = dict_["bpc"]
+
+                if iteration_counter % 25 == 0:
+                    print(f'Iteration {iteration_counter} Epoch {e+1} Batch {batch} Loss {loss_:.4f}'
+                          f' Perplexity {perp:.4f} Bits Per Word (bpw) {bpc:.4f}')
+                batch += 1
+
+                # every 1000 iterations run through
+                if iteration_counter % 250 == 0:
+                    if "val" in data_dict.keys():
+                        print(f"Running through the validation set now!")
+                        self._run_validation(e, save_filepath_val, data_dict["val"],
+                                             num_aux_tokens, iteration_counter)  # note e+1 is not correct.
+
+                if (iteration_counter) % 500 == 0:
+                    ckpt_save_path = self.ckpt_manager.save()
+                    print(f'Saving checkpoint for iteration {iteration_counter} at {ckpt_save_path}')
+
+                header = True if iteration_counter == 1 else False
+                self._save_iteration_results("train", iteration_counter, save_filepath_train, header, loss_, perp, bpc)
+
+            total_loss = epoch_loss / epoch_size  # this is the loss of all words divided by the number of words (while eliminating the effect of the padding tokens)
+            dict__ = self.perplexity_bpc_function(total_loss)
+            if "perplexity" in dict__.keys():
+                epoch_perp = dict__["perplexity"]
+            if "bpc" in dict_.keys():
+                epoch_bpc = dict__["bpc"]
+            print(
+                f'Epoch {e + 1} Loss {total_loss:.4f} Perplexity {epoch_perp:.4f} Bits Per Word (bpw) {epoch_bpc:.4f}')
+            print(f'Time taken for epoch {e + 1}: {time.time() - start:.2f} secs\n')
+            # TODO: change from %1 later, just testing to see if works initially.
+
+            header = True if e == 0 else False
+            self._save_epoch_results("train", e + 1, save_filepath_train, header, total_loss, epoch_perp, epoch_bpc)
+
+            if "val" in data_dict.keys():
+                print(f"Running through the validation set now!")
+                self._run_validation(e, save_filepath_val, data_dict["val"], num_aux_tokens)  # note e+1 is not correct.
+
+    def train_batch(self, epoch_start, epoch_end, save_filepath_train, save_filepath_val, data_dict, num_aux_tokens):
+        # TODO: need a batch oriented and iteration oriented version of both. Split both into private functions
+        # and add in a parameter to choose between the two.
         for e in range(epoch_start, epoch_end):
             start = time.time()
 
@@ -154,13 +222,13 @@ class ParentTrainNL:
                 if "bpc" in dict_.keys():
                     bpc = dict_["bpc"]
 
-                if batch % 1 == 0:
+                if batch % 10 == 0:
                     print(f'Epoch {e+1} Batch {batch} Loss {loss_:.4f} Perplexity {perp:.4f} Bits Per Word (bpw) {bpc:.4f}')
                 batch += 1
 
             total_loss = epoch_loss/epoch_size # this is the loss of all words divided by the number of words (while eliminating the effect of the padding tokens)
             dict__ = self.perplexity_bpc_function(total_loss)
-            if "perplexity" in dict_.keys():
+            if "perplexity" in dict__.keys():
                 epoch_perp = dict__["perplexity"]
             if "bpc" in dict_.keys():
                 epoch_bpc = dict__["bpc"]
@@ -179,7 +247,7 @@ class ParentTrainNL:
                 print(f"Running through the validation set now!")
                 self._run_validation(e, save_filepath_val, data_dict["val"], num_aux_tokens) # note e+1 is not correct.
 
-    def _run_validation(self, e, save_filepath, validation, num_aux_tokens):
+    def _run_validation(self, e, save_filepath, validation, num_aux_tokens, iteration_counter=None):
         start = time.time()
         #batch = 0
         # Still calculate below to get the perplexity and bits per Word scores.
@@ -215,8 +283,13 @@ class ParentTrainNL:
             f'Epoch {e+1} Val Loss {total_loss:.4f} Val Perplexity {epoch_perp:.4f} Val Bits Per Word (bpw) {epoch_bpc:.4f}')
         print(f'Time taken for one epoch (val) {e+1}: {time.time() - start:.2f} secs\n')
 
-        header = True if e == 0 else False
-        self._save_epoch_results("val", e+1, save_filepath, header, total_loss, epoch_perp, epoch_bpc)
+        if iteration_counter is None:
+            header = True if e == 0 else False
+            self._save_epoch_results("val", e+1, save_filepath, header, total_loss, epoch_perp, epoch_bpc)
+        else:
+            header = True if iteration_counter == 1 else False # todo this is broken.
+            # note: here the iteration refers to the iteration in the training loop.
+            self._save_iteration_results("val", iteration_counter, save_filepath, header, total_loss, epoch_perp, epoch_bpc)
 
     def val_step(self, tar_inp, tar_real, nm_inp, num_aux_tokens):
 
@@ -256,17 +329,17 @@ class ParentTrainNL:
     def _save_epoch_results(self, type_, epoch, save_filepath, header, total_loss, epoch_perp, epoch_bpc):
 
         assert isinstance(type_, str) and isinstance(save_filepath, str)
-        file = save_filepath+type_+".txt"
+        file = save_filepath+type_+"epoch"+".txt"
         with open(file, "a") as f:
-            #if header and type_ == "train":
-            f.write("Epoch Loss Perplexity BPC \n")
-            #elif header:
-            #    f.write("Epoch Loss Perplexity BPC \n")
-            #    # todo below is irrelevant at this stage
-            #if type_ == "train":
+            if header: f.write("Epoch Loss Perplexity BPC \n")
             f.write(f"{epoch} {total_loss} {epoch_perp} {epoch_bpc} \n")
-            #else:
-            #    f.write(f"{epoch} {total_loss} {epoch_perp} {epoch_bpc} \n")
+
+    def _save_iteration_results(self, type_, iteration, save_filepath, header, total_loss, epoch_perp, epoch_bpc):
+        assert isinstance(type_, str) and isinstance(save_filepath, str)
+        file = save_filepath+type_+"iteration"+".txt"
+        with open(file, "a") as f:
+            if header: f.write("Iteration Loss Perplexity BPC \n")
+            f.write(f"{iteration} {total_loss} {epoch_perp} {epoch_bpc} \n")
 
     def run_no_train(self, data):
         '''
@@ -287,18 +360,19 @@ class ParentTrainNL:
             epoch_loss += loss
             epoch_size += size
 
-            loss_ = loss / size
-            loss_ = tf.cast(loss_, dtype=tf.dtypes.float32)
-            dict_ = self.perplexity_bpc_function(loss_)
+            #loss_ = loss / size
+            #loss_ = tf.cast(loss_, dtype=tf.dtypes.float32)
+            #dict_ = self.perplexity_bpc_function(loss_)
 
         total_loss = epoch_loss / epoch_size  # this is the loss of all words divided by the number of words (while eliminating the effect of the padding tokens)
         dict__ = self.perplexity_bpc_function(total_loss)
-        if "perplexity" in dict_.keys():
+        if "perplexity" in dict__.keys():
             perplexity = dict__["perplexity"]
-        if "bpc" in dict_.keys():
+        if "bpc" in dict__.keys():
             bpc = dict__["bpc"]
 
-        return total_loss, perplexity, bpc
+        return {"loss":total_loss, "perplexity(e^loss)":perplexity,
+                "bits per character":bpc}
 
     def generate_natural_language(self, string_input):
         # TODO: implement this later.

@@ -102,6 +102,13 @@ class Tokenizer(object):
         return self.tokenizer.tokenize(input) # this is for the reading stratetgies later, need the original word when it is unknown.
 
     #TODO add in decoding methods.
+    def batch_decode(self, input):
+        # list of list of integers.
+        return self.tokenizer.batch_decode(input)
+
+    def decode(self, input):
+        # list of integers
+        return self.tokenizer.decode(input)
 
 if __name__ == "__main__":
 

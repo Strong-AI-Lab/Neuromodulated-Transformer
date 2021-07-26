@@ -131,8 +131,8 @@ class load_wikitext103:
             print("Load successful at " + str(filepath))
 
 
-
     def default_tok_strategy_iterator(self):
+        # this is a naive way to go about it.
         # shufle, pad, nm_aux
         nm_aux_tok = []
         for word in self.aux_tok:
@@ -181,7 +181,65 @@ class load_wikitext103:
 
                 yield tar_inp, tar_real, nm_inp
 
-    def get_tf_dataset_generator(self, process_strategy, shuffle=False, pad=True, *nm_aux_tokens):
+    def sliding_window_article_iterator(self):
+        # this is a naive way to go about it.
+        # shufle, pad, nm_aux
+        nm_aux_tok = []
+        for word in self.aux_tok:
+            w = self.tokenizer.encode_single(word)
+            if len(w) > 1: raise Exception(f"{word} should only have on id associated with it in the tokenizer. Something went wrong!")
+            else: w = w[0]
+            nm_aux_tok.append(w)
+
+        keys = list(self.data_dict.keys())
+        #print(keys)
+        if self.shuffle:
+            random.shuffle(keys) # shuffles inplace.
+
+        for i, key in enumerate(keys):
+
+            article_ids = self.tokenizer.encode_single(self.data_dict[key])
+            #article_ids = article_ids["input_ids"]
+            start_index = 0
+            end_index = self.max_seq_len
+            tar_inp = None
+            nm_tar_inp = None
+            tar_real = None
+            article_len = len(article_ids)
+            counter = 0
+            while True:
+
+                if start_index >= article_len: break  # breaking condition for the article.
+
+                if end_index < article_len-1:
+                    tar_inp = article_ids[start_index:end_index]
+                    tar_real = article_ids[start_index+1:end_index+1]
+                else:
+                    tar_inp = article_ids[start_index:article_len-1] # -1 so there is an output token for the target.
+                    tar_real = article_ids[start_index+1:article_len] # i.e. shifted to the right.
+
+                if self.pad:
+                    tar_inp = tar_inp + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_inp))]
+                    tar_real = tar_real + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_real))]
+
+                nm_inp = nm_aux_tok + tar_inp
+
+                tar_inp = tf.cast(tf.convert_to_tensor(np.asarray(tar_inp)), dtype=tf.dtypes.int64)
+                tar_real = tf.cast(tf.convert_to_tensor(np.asarray(tar_real)), dtype=tf.dtypes.int64)
+                nm_inp = tf.cast(tf.convert_to_tensor(np.asarray(nm_inp)), dtype=tf.dtypes.int64)
+
+                start_index += self.sliding_window
+                end_index += self.sliding_window
+
+                if counter == 0:
+                    counter += 1
+                    yield tar_inp, tar_real, nm_inp, tf.ones((1), dtype=tf.dtypes.int64)
+                    # 1 indicates that we are at the first sentence in the article. (we should calculate the loss for all tokens)
+                else:
+                    yield tar_inp, tar_real, nm_inp, tf.zeros((1), dtype=tf.dtypes.int64)
+                    # 0 indicates that we are not at the first sentence in the article. (we should calculate the loss only for the last sliding_window tokens)
+
+    def get_tf_dataset_generator(self, process_strategy, shuffle=False, pad=True, sliding_window=None, *nm_aux_tokens):
 
         self.shuffle = shuffle
         self.pad = pad
@@ -194,13 +252,19 @@ class load_wikitext103:
         self.aux_tok = aux_tok
 
         generator = None
-
         if process_strategy == "default_tokenize":
-            generator = tf.data.Dataset.from_generator(self.default_tok_strategy_iterator, output_types=(tf.dtypes.int64,
-                                                                                                         tf.dtypes.int64,
-                                                                                                         tf.dtypes.int64))
-        elif process_strategy == "default_string":
-            pass
+            generator = tf.data.Dataset.from_generator(self.default_tok_strategy_iterator,
+                                                       output_types=(tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64))
+        elif process_strategy == "sliding_window_article":
+            assert isinstance(sliding_window, int), f"If sliding_window variable is must be an integer, got {type(sliding_window)}"
+            self.sliding_window = sliding_window
+            generator = tf.data.Dataset.from_generator(self.sliding_window_article_iterator,
+                                                       output_types=(tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64))
         elif process_strategy == "default_str_tok": # note: needed for my reading strategies later.
             pass
         else: raise Exception(f"Invalid processing strategy: {process_strategy}")
@@ -217,15 +281,45 @@ if __name__ == "__main__":
     end_tok = "</s>"
     pad_tok = "<pad>"
     strategy = "default"
-    load_data = [False, ""]
+    #load_data = [False, ""]
+    load_data = [True, "/large_data/wikitext-103/processed_data/train_heading_default_strategy.txt"]
 
     wiki_loader = load_wikitext103(filepath=filepath, tokenizer=tokenizer, end_tok=end_tok, pad_tok=pad_tok, strategy=strategy,
                                      load_data=load_data)
-    wiki_loader.save_json("/large_data/wikitext-103/processed_data/val_heading_default_strategy.txt")
+    #wiki_loader.save_json("/large_data/wikitext-103/processed_data/val_heading_default_strategy.txt")
     #load_data = [True, "/large_data/wikitext-103/val_test_v2.txt"]
     #wiki_loader = load_wikitext103V2(filepath=filepath, tokenizer=tokenizer, end_tok=end_tok, pad_tok=pad_tok, strategy=strategy,
     #                                 load_data=load_data)
+    process_strategy = "sliding_window_article"
+    shuffle = False
+    pad = True
+    generator = wiki_loader.get_tf_dataset_generator(process_strategy, shuffle, pad, 100, "<lm>", "<confidence>")
+    counter = 0
+    for batch, (inp, tar, nm, item) in enumerate(generator):
+        print(f"batch: {batch}")
+        print(f"inp.shape: {inp.shape} \t inp:{tokenizer.decode(inp)} \n"
+              f"nm.shape: {nm.shape} \t nm: {tokenizer.decode(nm)} \n"
+              f"tar.shape: {tar.shape} \t tar: {tokenizer.decode(tar)} \n"
+              f"item: {item} \n")
+        counter += 1
+        if counter == 20: break
+    '''
+    process_strategy = "default_tokenize"
+    shuffle = False
+    pad = True
+    generator = wiki_loader.get_tf_dataset_generator(process_strategy, shuffle, pad, "<lm>", "<confidence>")
+    counter = 0
+    for batch, (inp, tar, nm) in enumerate(generator):
+        if batch < 12000: continue
+        if batch >= 12003: break
+        print(f"batch: {batch}")
+        print(f"inp.shape: {inp.shape} \t inp: {inp} -- {tokenizer.decode(inp)} \n"
+              f"nm.shape: {nm.shape} \t nm: {tokenizer.decode(nm)} \n"
+              f"tar.shape: {tar.shape} \t tar: {tokenizer.decode(tar)} \n")
 
+        if counter == 20: break
+    '''
+    '''
     filepath = "/large_data/wikitext-103/wiki.test.tokens"
     wiki_loader = load_wikitext103(filepath=filepath, tokenizer=tokenizer, end_tok=end_tok, pad_tok=pad_tok, strategy=strategy,
                                      load_data=load_data)
@@ -235,6 +329,7 @@ if __name__ == "__main__":
     wiki_loader = load_wikitext103(filepath=filepath, tokenizer=tokenizer, end_tok=end_tok, pad_tok=pad_tok, strategy=strategy,
                                      load_data=load_data)
     wiki_loader.save_json("/large_data/wikitext-103/processed_data/train_heading_default_strategy.txt")
+    '''
 
     '''
     process_strategy="default_tokenize"

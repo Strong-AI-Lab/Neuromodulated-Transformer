@@ -189,6 +189,7 @@ class Encoder(tf.keras.layers.Layer):
             x *= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
             x += self.pos_encoding[:, :seq_len, :]
             # TODO: consider if normalization needs to occur here?
+            x /= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
             x = self.dropout(x, training=training)
 
         attention_weights = dict()

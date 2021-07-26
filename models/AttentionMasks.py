@@ -43,6 +43,7 @@ def create_look_ahead_mask(size, num_aux_tok):
     # Keep lower trianglar part only (i.e. set to a value of 0 and upper triangle part to 1's). # a 1 means that we are to pad it.
     # Note: padding id variation is irrelevant here as ones represent what we are to keep, and 0's what to pad out.
 
+    # TODO modify so the top part can't cheat, it currently does.
     mask = 1 - tf.linalg.band_part(tf.ones((size-num_aux_tok, size-num_aux_tok)), -1, 0)
     if num_aux_tok == 0: return mask # skip the extra processing as it isn't needed.
 

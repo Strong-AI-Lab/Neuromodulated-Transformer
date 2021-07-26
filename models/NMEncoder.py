@@ -2,7 +2,7 @@
 File name: NMEncoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 15/07/21
+Data last modified: 23/07/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -72,13 +72,15 @@ class NMEncoderLayer(tf.keras.layers.Layer):
         '''
         assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
-        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=None, mask=mask)
+        x_ = self.layernorm1(x)
+        attn1, attn_weights = self.mha(x_, x_, x_, nm_inp_gating=None, mask=mask)
         attn1 = self.dropout1(attn1, training=training)
-        out1 = self.layernorm1(x + attn1)
+        out1 = (x + attn1)
 
-        out2 = self.ffn(out1)
+        out1_ = self.layernorm2(out1)
+        out2 = self.ffn(out1_)
         out2 = self.dropout2(out2, training=training)
-        out2 = self.layernorm2(out1 + out2)
+        out2 = out1 + out2
 
         return out2, attn_weights
 
@@ -194,6 +196,7 @@ class NMEncoder(tf.keras.layers.Layer):
             x *= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
             x += self.pos_encoding[:, :seq_len, :]
             # TODO: consider if normalization needs to occur here?
+            x /= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
             x = self.dropout(x, training=training)
 
         attention_weights = dict()
@@ -213,7 +216,9 @@ class NMEncoder(tf.keras.layers.Layer):
         if self.counter == 0: # i.e. we are at the end and it has been reset to zero.
             for key, layer in self.parallel_layers.items():
                 if key in restrictions: continue
-                x_dict[key] = layer(x, training, mask) # this will be a tuple containing the output (x, attn_weights)
+                #if key == "nm_eol_gate": x_dict[key] = layer(x, training, mask) # this will be a tuple containing the output (x, attn_weights)
+                #else: x_dict[key] = layer(tf.stop_gradient(x), training, mask) # only want the baseline network to be updated once.
+                x_dict[key] = layer(x, training, mask)  # this will be a tuple containing the output (x, attn_weights)
             if len(x_dict.keys()) == 0: x_dict["default"] = (x, attention_weights) # i.e. return x if the dictionary is empty.
         return x_dict
 
