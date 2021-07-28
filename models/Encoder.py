@@ -2,7 +2,7 @@
 File name: Encoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 15/07/21
+Data last modified: 29/07/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -89,13 +89,15 @@ class EncoderLayer(tf.keras.layers.Layer):
             nm_inp_gating_attn = nm_inp_gating_attn[:,-x.shape[1]:, -x.shape[1]:] # remove global_auxiliary tokens.
         else: assert not self.nm_attn, f"If nm_inp_gating_attn is None then, nm_attn should be set to False, got {self.nm_attn}"
 
-        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=nm_inp_gating_attn, mask=mask)
+        x_ = self.layernorm1(x)
+        attn1, attn_weights = self.mha(x_, x_, x_, nm_inp_gating=nm_inp_gating_attn, mask=mask)
         attn1 = self.dropout1(attn1, training=training)
-        out1 = self.layernorm1(x + attn1)
+        out1 = x + attn1
 
-        out2 = self.ffn(out1)
+        out1_ = self.layernorm2(out1)
+        out2 = self.ffn(out1_)
         out2 = self.dropout2(out2, training=training)
-        out2 = self.layernorm2(out1 + out2)
+        out2 = out1 + out2
 
         if nm_inp_gating_eol is not None:
             assert self.nm_eol, f"If nm_inp_gating_eol is not None, then nm_eol should be set to True, got {self.nm_eol}!"
