@@ -157,7 +157,7 @@ class load_wikitext103:
             tar_real = None
             article_len = len(article_ids)
             while True:
-                if start_index >= article_len: break # breaking condition for the article.
+                if start_index >= article_len-1: break # breaking condition for the article.
 
                 if end_index < article_len-1:
                     tar_inp = article_ids[start_index:end_index]
@@ -187,8 +187,8 @@ class load_wikitext103:
         nm_aux_tok = []
         for word in self.aux_tok:
             w = self.tokenizer.encode_single(word)
-            if len(w) > 1: raise Exception(f"{word} should only have on id associated with it in the tokenizer. Something went wrong!")
-            else: w = w[0]
+            if len(w) == 1: w = w[0]
+            else: raise Exception(f"{word} should only have on id associated with it in the tokenizer. Something went wrong!")
             nm_aux_tok.append(w)
 
         keys = list(self.data_dict.keys())
@@ -209,8 +209,8 @@ class load_wikitext103:
             counter = 0
             while True:
 
-                if start_index >= article_len: break  # breaking condition for the article.
-
+                if start_index >= article_len-1: break  # breaking condition for the article.
+                # article_len -1 because want tar_real to be </s> at the very least if start_index is article_len-2
                 if end_index < article_len-1:
                     tar_inp = article_ids[start_index:end_index]
                     tar_real = article_ids[start_index+1:end_index+1]
@@ -218,9 +218,11 @@ class load_wikitext103:
                     tar_inp = article_ids[start_index:article_len-1] # -1 so there is an output token for the target.
                     tar_real = article_ids[start_index+1:article_len] # i.e. shifted to the right.
 
-                if self.pad:
-                    tar_inp = tar_inp + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_inp))]
-                    tar_real = tar_real + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_real))]
+                if self.pad: # TODO: interesting <pad> tokens to be added before hand because of sliding windows.
+                    #tar_inp = tar_inp + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_inp))]
+                    #tar_real = tar_real + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_real))]
+                    tar_inp = [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_inp))] + tar_inp
+                    tar_real = [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_real))] + tar_real
 
                 nm_inp = nm_aux_tok + tar_inp
 

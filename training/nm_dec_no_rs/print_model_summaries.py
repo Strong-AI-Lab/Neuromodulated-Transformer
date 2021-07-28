@@ -28,9 +28,9 @@ if __name__ == "__main__":
     tokenizer.add_tokens_list(["<s>", "</s>", "<pad>"], update_vocab_size_dec=True)
     tokenizer.add_tokens_list(["<dec>", "<lm>", "<confidence>"], update_vocab_size_dec=True)
 
-    num_layers_dec, num_layers_nm = 12, 12
-    d_model, num_heads, dff = 512, 8, 1024
-    max_seq_len_dec, max_seq_len_nm = 512, 514
+    num_layers_dec, num_layers_nm = 8, 8
+    d_model, num_heads, dff = 768, 12, 768 * 2
+    max_seq_len_dec, max_seq_len_nm = 512, 512
     target_vocab_size, nm_vocab_size = tokenizer.get_vocab_size_dec(), tokenizer.get_vocab_size_dec()
     batch_size = 2  # last number is the number of gpus, first is the batch size per gpu.
     parallel_layers = {}

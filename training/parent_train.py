@@ -37,7 +37,7 @@ class ParentTrainNL:
     '''
     def __init__(self, model, optimizer, loss_object, loss_function, tokenizer,
                  checkpoint_path_recent, checkpoint_path_best, strategy, pad_token="<pad>",
-                 recent_to_keep=5, load_recent=False, best_to_keep=5, load_best=False):
+                 recent_to_keep=5, load_recent=False, best_to_keep=5, load_best=False, load_specific_path=''):
 
         assert not(load_recent and load_best), f"load_recent ({load_recent}) and load_best ({load_best}) can't both be set to True!"
 
@@ -60,6 +60,9 @@ class ParentTrainNL:
         # the recent checkpoints are required.
         self._create_recent_checkpoint(recent_to_keep)
         if load_recent: self._load_recent_checkpoint()
+        if load_specific_path != "":
+            if load_recent: print(f"Note: load_recent command has been overridden.")
+            self._restore_specific_checkpoint(load_specific_path)
 
         #TODO: support for best checkpoint saver to come.
         #if self.checkpoint_path_best != "": self._create_best_checkpoint(best_to_keep)
@@ -78,6 +81,11 @@ class ParentTrainNL:
         if self.ckpt_manager.latest_checkpoint:
             self.ckpt.restore(self.ckpt_manager.latest_checkpoint)
             print("Latest checkpoint restored.")
+
+        # ckpt.restore(ckpt_path)
+
+    def _restore_specific_checkpoint(self, filepath): # TODO add support for this function.
+        self.ckpt.restore(filepath)
 
     def _create_best_checkpoint(self, keep):
         #https://github.com/vonclites/checkmate
