@@ -6,7 +6,7 @@ Data last modified: 23/07/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
- 
+
 import tensorflow as tf
 import numpy as np
 

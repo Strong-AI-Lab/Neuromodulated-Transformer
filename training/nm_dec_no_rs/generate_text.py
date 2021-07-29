@@ -51,54 +51,27 @@ if __name__ == "__main__":
     parallel_layers["nm_attn_gate"] = "GateLayerAttn"
     parallel_layers["nm_eol_gate"] = "NMEncoderLayerNoRC"
 
-    loss_object = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False, # softmax is to be applied before hand.
-                                                                reduction='none')
-
     learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(0.0001, decay_steps=1000,
                                                                    decay_rate=0.95, staircase=False, name=None)
-    #learning_rate = 0.0001
-    transformer = None
-    optimizer = None
 
-    if strategy is not None:
-        with strategy.scope():
-            transformer = NMTransformerDec(num_layers_dec, num_layers_nm, d_model, num_heads, dff, max_seq_len_dec,
-                                           max_seq_len_nm, target_vocab_size, nm_vocab_size, max_position_encoding_dec=2000,
-                                           max_position_encoding_nm=2000, rate=0.1, nm_attn=True, nm_eol=True,
-                                           parallel_layers=parallel_layers)
-            optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.999)
-            #optimizer = tf.keras.optimizers.SGD(learning_rate, momentum=0.1)
-    else:
-        transformer = NMTransformerDec(num_layers_dec, num_layers_nm, d_model, num_heads, dff, max_seq_len_dec,
-                                       max_seq_len_nm, target_vocab_size, nm_vocab_size,
-                                       max_position_encoding_dec=2000,
-                                       max_position_encoding_nm=2000, rate=0.1, nm_attn=True, nm_eol=True,
-                                       parallel_layers=parallel_layers)
-        optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.999)
+    transformer = NMTransformerDec(num_layers_dec, num_layers_nm, d_model, num_heads, dff, max_seq_len_dec,
+                                   max_seq_len_nm, target_vocab_size, nm_vocab_size, max_position_encoding_dec=2000,
+                                   max_position_encoding_nm=2000, rate=0.1, nm_attn=True, nm_eol=True,
+                                   parallel_layers=parallel_layers)
+    optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.999)
 
-    data_dict = {}
-    data_dict["train"] = get_generator(filepath="/large_data/wikitext-103/wiki.train.tokens",
-                                       load_data=[True, "/large_data/wikitext-103/processed_data/train_heading_default_strategy.txt"],
-                                       batch_size=batch_size,
-                                       process_strategy="sliding_window_article",
-                                       window_size=512)
-    if strategy is not None:
-        data_dict["train"] = strategy.experimental_distribute_dataset(data_dict["train"])
-
-    data_dict["val"] = get_generator(filepath="/large_data/wikitext-103/wiki.valid.tokens",
-                                     load_data=[True, "/large_data/wikitext-103/processed_data/val_heading_default_strategy.txt"],
-                                     batch_size=batch_size,
-                                     process_strategy="sliding_window_article",
-                                     window_size=32, shuffle=False)
-    if strategy is not None:
-        data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
-
-    train_class = SlidingWindowTrain(transformer, optimizer, loss_object, loss_function_window_size, tokenizer,
+    train_class = SlidingWindowTrain(transformer, optimizer, None, None, tokenizer,
                  checkpoint_path_recent="../../checkpoints", checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
-                 recent_to_keep=50, load_recent=True, best_to_keep=5, load_best=False, window_size_train=32, window_size_val=32)
-    train_class.train_iteration(epoch_start=0, epoch_end=1, save_filepath_train="../../results/",
-                       save_filepath_val="../../results/", data_dict=data_dict, num_aux_tokens=0)
+                 recent_to_keep=50, load_recent=False, best_to_keep=5, load_best=False, window_size_train=32, window_size_val=32,
+                 load_specific_path="/home/kkno604/Documents/Neuromodulated-Transformer-Results/Results nm_dec_sliding_window_32/16.7918 perplexity/ckpt-29")
 
+    string_input = "= Robert Boulter = </s> Robert Boulter is an English film , television and theatre actor . He had a guest @-@ starring role on the television series The Bill in 2000 . This was followed by a starring role in the play Herons written by Simon Stephens , which was performed in 2001 at the Royal Court Theatre . He had a guest role in the television series Judge John Deed in 2002 . In 2004"
+    pad_to_length = 512
+    num_aux_tokens = 0
+    num_to_generate = 40
+
+    output = train_class.generate_natural_language(string_input, pad_to_length, num_aux_tokens, num_to_generate)
+    print(f"Generated text results: {output}")
 
 '''
 Documenting results here.
@@ -114,8 +87,7 @@ Lowered decay_rate (.96->.95) and rate_steps (1500->1000). --- still diverged- w
 changed to 768 hidden dimension and 12 heads. good initial results. got down to 16.... perplexity, then went up again. (1 epoch)
 Run again on 2nd epoch but with adjusted learning rate (i.e. very small). 0.00001 learning rate now with exponential decay.
 
-change to log softmax and initialize embedding layer to zero, so pad tokens are always zero. 
-    learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(0.0001, decay_steps=1000,
-                                                                   decay_rate=0.95, staircase=False, name=None) 
+
+Changed  
 '''
 

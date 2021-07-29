@@ -2,12 +2,13 @@
 File name: parent_train.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 17/07/21
+Data last modified: 29/07/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
 
 import tensorflow as tf
+import numpy as np
 import math
 import time
 
@@ -382,9 +383,53 @@ class ParentTrainNL:
         return {"loss":total_loss, "perplexity(e^loss)":perplexity,
                 "bits per character":bpc}
 
-    def generate_natural_language(self, string_input):
-        # TODO: implement this later.
-        pass
+    def generate_natural_language(self, string_input, pad_to_length, num_aux_tokens, num_to_generate,
+                                  tokens_to_avoid=["<pad>", "</s>", "<unk>"]):
+        '''
+        Function: generate_natural_language. \n
+        Description: Function that generates output text given a string as input. \n
+        Input:
+            string_input: (str) Input to be used as context to generate text. \n
+            pad_to_length: (int) The number of tokens to pad to (i.e. to max_seq_len). \n
+            num_aux_tokens: (int) The number of aux_tokens at the beginning of the neuromodulation encoder's input. \n
+            num_to_generate: (int) The number of words to generate on top of the input.
+        Return:
+            (string)
+        '''
+
+        enc_str = self.tokenizer.encode_single(string_input)
+
+        for i in range(num_to_generate):
+            pad_enc_str = enc_str + [self.padding_id for _ in range(pad_to_length-len(enc_str))]
+            encoded_inp = tf.cast(tf.convert_to_tensor(np.asarray(pad_enc_str)),
+                                  dtype=tf.dtypes.int64)  # shape: (inp_seq_len)
+            encoded_inp = tf.expand_dims(encoded_inp, axis=0)  # shape: (batch_size (1), inp_seq_len)
+
+            nm_mask = create_combined_mask(encoded_inp, self.padding_id, num_aux_tokens)
+            dec_mask = create_combined_mask(encoded_inp, self.padding_id)
+
+            output, _, _ = self.model(encoded_inp, encoded_inp, training=False, padding_id=self.padding_id,
+                                           num_aux_tok=num_aux_tokens, nm_mask=nm_mask, dec_mask=dec_mask)
+            predictions = tf.nn.log_softmax(output, axis=-1) # shape: (batch_size (1), max_seq_len, tar_vocab_size)
+            #predictions = output
+            predictions = tf.squeeze(predictions) # shape: (max_seq_len, tar_vocab_size)
+
+            predictions = tf.squeeze(predictions[len(enc_str)-1,:]) # length_inp works as is because python starts at index 0.
+            # shape: (target_vocab_size)
+            #pred = tf.math.argmax(predictions) # note that for the tokenizer the first index id starts at 0 for my case.
+            pred = tf.nn.top_k(predictions, k=len(tokens_to_avoid)+1, sorted=True, name=None)[1].numpy()
+            tok = self._return_valid_index(pred, tokens_to_avoid)
+
+            enc_str.append(tok[0])
+            print("tok", tok)
+
+        return self.tokenizer.decode(enc_str)
+
+    def _return_valid_index(self, pred, avoid):
+        if self.tokenizer.decode(pred.tolist()[0]) not in avoid:
+            return pred
+        else:
+            return self._return_valid_index(pred[1:], avoid)
 
 def loss_function_sequence_split(real, pred, loss_object, padding_id):
 

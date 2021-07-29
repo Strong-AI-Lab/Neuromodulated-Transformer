@@ -2,7 +2,7 @@
 File name: NMTransformerDec.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 16/07/21
+Data last modified: 29/07/21
 Python version: 3.6
 Tensorflow version: 2
 '''
@@ -68,12 +68,17 @@ class NMTransformerDec(tf.keras.Model):
             padding_id: (int) The id of the <pad> token, to be used in mask creation. Defaults to 0. \n
             num_aux_tok: (int) The number of auxiliary tokens in the neuromodulated encoder's input. Defaults to 0. \n
         Return:
+            final_output:
+            attn_weights:
+            output_dict:
         '''
         output_dict = self._run_nm_encoder(nm_inp, training, padding_id, num_aux_tok, nm_mask) # (output, attn_weights) for each key.
         dec_output, attn_weights = self._run_decoder(dec_inp, training, output_dict["nm_attn_gate"][0],
                                                      output_dict["nm_eol_gate"][0], padding_id, dec_mask)
 
         final_output = self.final_layer(dec_output)
+
+        final_output = tf.nn.softmax(final_output, axis=-1)
 
         return final_output, attn_weights, output_dict
 

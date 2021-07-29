@@ -219,10 +219,10 @@ class load_wikitext103:
                     tar_real = article_ids[start_index+1:article_len] # i.e. shifted to the right.
 
                 if self.pad: # TODO: interesting <pad> tokens to be added before hand because of sliding windows.
-                    #tar_inp = tar_inp + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_inp))]
-                    #tar_real = tar_real + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_real))]
-                    tar_inp = [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_inp))] + tar_inp
-                    tar_real = [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_real))] + tar_real
+                    tar_inp = tar_inp + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_inp))]
+                    tar_real = tar_real + [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_real))]
+                    #tar_inp = [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_inp))] + tar_inp
+                    #tar_real = [self.pad_tok_id for _ in range(self.max_seq_len-len(tar_real))] + tar_real
 
                 nm_inp = nm_aux_tok + tar_inp
 

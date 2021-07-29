@@ -75,10 +75,14 @@ def create_combined_mask(x, padding_id=0, num_aux_tok=0):
     return combined_mask
 
 if __name__ == "__main__":
-    size = 5
-    num_aux_tok = 2
-    batch = 3
-    x = tf.random.uniform((batch, size), minval=0, maxval=10)
+    size = 8
+    num_aux_tok = 0
+    batch = 8
+    x = tf.random.uniform((batch, size), minval=0, maxval=2, dtype=tf.dtypes.int32)
+    print(f"x tensor (input): {x}")
     mask = create_combined_mask(x, 0, num_aux_tok)
     print(f"mask.shape: {mask.shape} \n" \
           f"mask: {mask}")
+    padding_mask = create_padding_mask(x, padding_id=0)
+    print(f"padding_mask.shape: {padding_mask.shape} \n" \
+          f"padding_mask: {padding_mask}")

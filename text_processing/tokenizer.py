@@ -61,6 +61,7 @@ class Tokenizer(object):
     def get_vocab_dict(self):
         return self.tokenizer.get_vocab()
 
+    # TODO should put sample input/output for all.
     def encode_single(self, input):
         assert isinstance(input, str), f"The input ({input}) is not of type string, got {type(input)}!"
         return self.tokenizer.encode(input, add_special_tokens=False, pad_to_max_length=False) # this will be a list.
@@ -114,6 +115,13 @@ if __name__ == "__main__":
 
     tok = TransfoXLTokenizer.from_pretrained("transfo-xl-wt103")
     tokenizer = Tokenizer(tok)
+
+    for val in tokenizer.get_vocab_dict().values():
+        print("get the first index")
+        print(val)
+        break
+    #print(f"Tokenizer vocabulary: \n {min(tokenizer.get_vocab_dict().values())}")
+
     print(tokenizer.encode_single_id_string("The lakers have 17 NBA championships!!!! <dec>"))
 
     print(tokenizer.get_vocab_size_dec())
