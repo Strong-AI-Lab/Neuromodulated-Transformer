@@ -56,7 +56,7 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
 
         self.nm_gate_logits = None
         if self.nm_gating:
-            self.nm_gate_logits = [tf.keras.layers.Dense(self.max_seq_len) for _ in range(num_heads)] # TODO: is a single dense layer sufficient?
+            self.nm_gate_logits = [tf.keras.layers.Dense(self.max_seq_len) for _ in range(num_heads)]
 
         self.dense = tf.keras.layers.Dense(d_model)
 
@@ -72,8 +72,8 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
         assert len(x.shape) == 3, f"The number of dimensions of the input x should be 3, got {x.shape}!"
         batch_size = x.shape[0]
 
-        x = tf.reshape(x, (batch_size, self.num_heads, -1, self.depth)) # -1 represents max_seq_len dimension.
-        return x
+        x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
+        return tf.transpose(x, perm=[0, 2, 1, 3])
 
     def call(self, v, k, q, nm_inp_gating=None, mask=None):
         '''

@@ -2,7 +2,7 @@
 File name: NMEncoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 23/07/21
+Data last modified: 10/08/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -147,30 +147,21 @@ class NMEncoder(tf.keras.layers.Layer):
 
         self.parallel_layers = {}
 
-        for key, layer in parallel_layers.items():
-            if layer == "EncoderLayer":
-                self.parallel_layers[key] = NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate)
-            elif layer == "NMEncoderLayerNoRC":
-                self.parallel_layers[key] = NMEncoderLayerNoRC(d_model, num_heads, dff, max_seq_len, rate)
-            elif layer == "GateLayerAttn":
-                self.parallel_layers[key] = GateLayerAttn(d_model, num_heads, dff, max_seq_len, rate)
-            elif layer == "MetacognitionSequenceLayer":
-                self.parallel_layers[key] = MetacognitionSequenceLayer(d_model, num_heads, dff, max_seq_len, rate)
-            elif layer == "MetacognitionSingleLayer":
-                self.parallel_layers[key] = MetacognitionSingleLayer(d_model, num_heads, dff, max_seq_len, rate)
-
-        #self.valid_names = [
-        #                    "nm_attn_gate_lm",
-        #                    "nm_eol_gate_lm",
-        #                    "nm_attn_gate",
-        #                    "nm_eol_gate",
-        #                    "unk_reading_strategy",
-        #                    "highlighting_reading_strategy",
-        #                    "aoi_reading_strategy",
-        #                    "re_read_reading_strategy",
-        #                    "paraphrase_reading_strategy",
-        #                    "summarization_reading_strategy"
-        #                    ]
+        for key, layer in parallel_layers.items(): # modify layer to be a list of size 2. [layer name (str), The number of layers (int)]
+            if layer[0] == "EncoderLayer":
+                self.parallel_layers[key] = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1])] # TODO: here add supuport for multiple...
+            elif layer[0] == "NMEncoderLayerNoRC":
+                self.parallel_layers[key] = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
+                                            [NMEncoderLayerNoRC(d_model, num_heads, dff, max_seq_len, rate)]
+            elif layer[0] == "GateLayerAttn":
+                self.parallel_layers[key] = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
+                                            [GateLayerAttn(d_model, num_heads, dff, max_seq_len, rate)]
+            elif layer[0] == "MetacognitionSequenceLayer":
+                self.parallel_layers[key] = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
+                                            [MetacognitionSequenceLayer(d_model, num_heads, dff, max_seq_len, rate)]
+            elif layer[0] == "MetacognitionSingleLayer":
+                self.parallel_layers[key] = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
+                                            [MetacognitionSingleLayer(d_model, num_heads, dff, max_seq_len, rate)]
 
     def call(self, x, training, mask, restrictions=[]):
         '''
@@ -218,7 +209,12 @@ class NMEncoder(tf.keras.layers.Layer):
                 if key in restrictions: continue
                 #if key == "nm_eol_gate": x_dict[key] = layer(x, training, mask) # this will be a tuple containing the output (x, attn_weights)
                 #else: x_dict[key] = layer(tf.stop_gradient(x), training, mask) # only want the baseline network to be updated once.
-                x_dict[key] = layer(x, training, mask)  # this will be a tuple containing the output (x, attn_weights)
+                # todo iterate through each layer
+                out, attn_weights = x, []
+                for l in layer:
+                    out, aw = l(out, training, mask)
+                    attn_weights.append(aw)
+                x_dict[key] = (out, attn_weights)  # this will be a tuple containing the output (x, attn_weights)
             if len(x_dict.keys()) == 0: x_dict["default"] = (x, attention_weights) # i.e. return x if the dictionary is empty.
         return x_dict
 
@@ -284,9 +280,10 @@ class NMEncoderLayerNoRC(tf.keras.layers.Layer):
         '''
         assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
-        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=None, mask=mask)
+        x_ = self.layernorm1(x)
+        attn1, attn_weights = self.mha(x_, x_, x_, nm_inp_gating=None, mask=mask)
         attn1 = self.dropout1(attn1, training=training)
-        out1 = self.layernorm1(x + attn1)
+        out1 = x + attn1
 
         out2 = self.ffn(out1)
         out2 = self.dropout2(out2, training=training) # allowed here unlike other layers.
@@ -332,7 +329,7 @@ class GateLayerAttn(tf.keras.layers.Layer):
         #self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for feed forward network.
 
         self.dropout1 = tf.keras.layers.Dropout(rate)
-        #self.dropout2 = tf.keras.layers.Dropout(rate)
+        self.dropout2 = tf.keras.layers.Dropout(rate)
 
     def call(self, x, training, mask):
         '''
@@ -348,12 +345,14 @@ class GateLayerAttn(tf.keras.layers.Layer):
         '''
         assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
-        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=None, mask=mask)
+        x_ = self.layernorm1(x)
+        attn1, attn_weights = self.mha(x_, x_, x_, nm_inp_gating=None, mask=mask)
         attn1 = self.dropout1(attn1, training=training)
-        out1 = self.layernorm1(x + attn1)
+        out1 = x + attn1
 
         out2 = self.ffn(out1)
-        # residual and dropout removed here as never want these values to equal 0 and the residual connection modifies the dimenisons.
+        out2 = self.dropout2(out2, training=training)
+        # residual connection removed here as never want these values to equal 0 and the residual connection modifies the dimenisons.
 
         return out2, attn_weights
 
@@ -395,7 +394,7 @@ class MetacognitionSequenceLayer(tf.keras.layers.Layer):
         #self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for feed forward network.
 
         self.dropout1 = tf.keras.layers.Dropout(rate)
-        #self.dropout2 = tf.keras.layers.Dropout(rate)
+        self.dropout2 = tf.keras.layers.Dropout(rate)
 
     def call(self, x, training, mask):
         '''
@@ -411,12 +410,14 @@ class MetacognitionSequenceLayer(tf.keras.layers.Layer):
         '''
         assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
-        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=None, mask=mask)
+        x_ = self.layernorm1(x)
+        attn1, attn_weights = self.mha(x_, x_, x_, nm_inp_gating=None, mask=mask)
         attn1 = self.dropout1(attn1, training=training)
-        out1 = self.layernorm1(x + attn1)
+        out1 = x + attn1
 
         out2 = self.ffn(out1)
-        # residual and dropout removed here as never want these values to equal 0 and the residual connection modifies the dimenisons.
+        out2 = self.dropout2(out2, training=training)
+        # residual and dropout removed here as never want these values to equal 0 and the residual connection modifies the dimenisons???
 
         return out2, attn_weights
 
@@ -459,7 +460,7 @@ class MetacognitionSingleLayer(tf.keras.layers.Layer):
         #self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for feed forward network.
 
         self.dropout1 = tf.keras.layers.Dropout(rate)
-        #self.dropout2 = tf.keras.layers.Dropout(rate)
+        self.dropout2 = tf.keras.layers.Dropout(rate)
 
     def call(self, x, traMetacognitionSingleLayerining, mask):
         '''
@@ -475,11 +476,13 @@ class MetacognitionSingleLayer(tf.keras.layers.Layer):
         '''
         assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
-        attn1, attn_weights = self.mha(x, x, x, nm_inp_gating=None, mask=mask)
+        x_ = self.layernorm1(x)
+        attn1, attn_weights = self.mha(x_, x_, x_, nm_inp_gating=None, mask=mask)
         attn1 = self.dropout1(attn1, training=training)
-        out1 = self.layernorm1(x + attn1)
+        out1 = x + attn1
 
         out2 = self.ffn(out1)
+        out2 = self.dropout2(out2, training=training)
         # residual and dropout removed here as never want these values to equal 0 and the residual connection modifies the dimenisons.
 
         return out2, attn_weights

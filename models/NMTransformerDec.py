@@ -2,7 +2,7 @@
 File name: NMTransformerDec.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 29/07/21
+Data last modified: 2/08/21
 Python version: 3.6
 Tensorflow version: 2
 '''
@@ -73,8 +73,10 @@ class NMTransformerDec(tf.keras.Model):
             output_dict:
         '''
         output_dict = self._run_nm_encoder(nm_inp, training, padding_id, num_aux_tok, nm_mask) # (output, attn_weights) for each key.
-        dec_output, attn_weights = self._run_decoder(dec_inp, training, output_dict["nm_attn_gate"][0],
-                                                     output_dict["nm_eol_gate"][0], padding_id, dec_mask)
+        dec_output, attn_weights = self._run_decoder(dec_inp, training,
+                                                     output_dict["nm_attn_gate"][0] if "nm_attn_gate" in output_dict.keys() else None,
+                                                     output_dict["nm_eol_gate"][0] if "nm_eol_gate" in output_dict.keys() else None,
+                                                     padding_id, dec_mask)
 
         final_output = self.final_layer(dec_output)
 

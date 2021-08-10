@@ -51,10 +51,10 @@ if __name__ == "__main__":
     parallel_layers["nm_attn_gate"] = "GateLayerAttn"
     parallel_layers["nm_eol_gate"] = "NMEncoderLayerNoRC"
 
-    loss_object = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, # no softmax is applied to the output before hand.
+    loss_object = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False,
                                                                 reduction='none')
 
-    learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(0.00001, decay_steps=1000,
+    learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(0.0001, decay_steps=1000,
                                                                    decay_rate=0.95, staircase=False, name=None)
     #learning_rate = 0.0001
     transformer = None
@@ -81,24 +81,24 @@ if __name__ == "__main__":
                                        load_data=[True, "/large_data/wikitext-103/processed_data/test_heading_default_strategy.txt"],
                                        batch_size=batch_size,
                                        process_strategy="sliding_window_article",
-                                       window_size=1, shuffle=False)
+                                       window_size=32, shuffle=False)
     if strategy is not None:
         data_dict["test"] = strategy.experimental_distribute_dataset(data_dict["test"])
 
-    data_dict["val"] = get_generator(filepath="/large_data/wikitext-103/wiki.valid.tokens",
-                                     load_data=[True, "/large_data/wikitext-103/processed_data/val_heading_default_strategy.txt"],
-                                     batch_size=batch_size,
-                                     process_strategy="sliding_window_article",
-                                     window_size=32, shuffle=False)
-    if strategy is not None:
-        data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
+    #data_dict["val"] = get_generator(filepath="/large_data/wikitext-103/wiki.valid.tokens",
+    #                                 load_data=[True, "/large_data/wikitext-103/processed_data/val_heading_default_strategy.txt"],
+    #                                 batch_size=batch_size,
+    #                                 process_strategy="sliding_window_article",
+    #                                 window_size=32, shuffle=False)
+    #if strategy is not None:
+    #    data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
 
     train_class = SlidingWindowTrain(transformer, optimizer, loss_object, loss_function_window_size, tokenizer,
                  checkpoint_path_recent="../../checkpoints", checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
                  recent_to_keep=50, load_recent=False, best_to_keep=5, load_best=False, window_size_train=32, window_size_val=32,
-                 load_specific_path="/home/kkno604/Documents/Neuromodulated-Transformer-Results/Results nm_dec_sliding_window_32/16.7918 perplexity/ckpt-29")
-    print(f"Validation results: {train_class.run_no_train(data_dict['val'], 0)}")
-    print(f"Test results: {train_class.run_no_train(data_dict['test'], 0)}")
+                 load_specific_path="/home/kkno604/Documents/Neuromodulated-Transformer-Results/Results sliding window 32 Updated/Checkpoints/ckpt-22")
+    #print(f"Validation results: {train_class.run_no_train(data_dict['val'], 0)}")
+    print(f"Test results: {train_class.run_no_train(data_dict['test'], 0)}") # TODO: note that this uses the val window size above (SlidingWindowTrain....) best to keep them the same.
 
 
 '''

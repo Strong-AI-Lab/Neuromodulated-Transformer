@@ -2,7 +2,7 @@
 File name: Decoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 23/07/21
+Data last modified: 10/08/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -60,7 +60,7 @@ class DecoderLayer(tf.keras.layers.Layer):
 
         # d_model, num_heads, max_seq_len, nm_gating=False
         self.mha1 = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=nm_attn)
-        self.mha2 = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False) # restriction here is that it is never gated given a context.
+        #self.mha2 = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False) # restriction here is that it is never gated given a context.
 
         self.ffn = FeedForwardNetwork(init_vanilla_ffn(d_model, dff))
 
@@ -74,6 +74,7 @@ class DecoderLayer(tf.keras.layers.Layer):
 
         if self.nm_eol:
             self.dense_eol = tf.keras.layers.Dense(d_model, activation='sigmoid')
+            self.eol_dropout = tf.keras.layers.Dropout(rate)
 
     def call(self, x, training, mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
         '''
@@ -118,6 +119,7 @@ class DecoderLayer(tf.keras.layers.Layer):
         if nm_inp_gating_eol is not None:
             assert self.nm_eol, f"If nm_inp_gating_eol is not None, then nm_eol should be set to True, got {self.nm_eol}!"
             nm_inp_gating_eol = self.dense_eol(nm_inp_gating_eol[:,-self.max_seq_len:,:]) #tf.math.sigmoid(nm_inp_gating_eol)
+            nm_inp_gating_eol = self.eol_dropout(nm_inp_gating_eol, training=training)
             out2 = nm_inp_gating_eol * out2
 
         return out2, attn_weights_block1

@@ -48,6 +48,8 @@ class SlidingWindowTrain(ParentTrainNL):
 
     def train_step(self, tar_inp, tar_real, nm_inp, num_aux_tokens, isStart):
 
+        norm = 0.1 # this is hardcoded, consider changing to a passable parameter to the training function.
+
         nm_mask = create_combined_mask(nm_inp, self.padding_id, num_aux_tokens)
         dec_mask = create_combined_mask(tar_inp, self.padding_id)
 
@@ -62,6 +64,9 @@ class SlidingWindowTrain(ParentTrainNL):
             loss_ = loss/size
 
         gradients = tape.gradient(loss_, self.model.trainable_variables)
+        gradients = [tf.clip_by_norm(g, norm)
+                 for g in gradients]
+
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
         return loss, size
@@ -114,19 +119,19 @@ class SlidingWindowTrain(ParentTrainNL):
                 if "bpc" in dict_.keys():
                     bpc = dict_["bpc"]
 
-                if iteration_counter % 25 == 0:
+                if iteration_counter % 250 == 0:
                     print(f'Iteration {iteration_counter} Epoch {e+1} Batch {batch} Loss {loss_:.4f}'
                           f' Perplexity {perp:.4f} Bits Per Word (bpw) {bpc:.4f}')
                 batch += 1
 
                 # every n iterations run through
-                if iteration_counter % 250 == 0:
+                if iteration_counter % 2500 == 0:
                     if "val" in data_dict.keys():
                         print(f"Running through the validation set now!")
                         self._run_validation(e, save_filepath_val, data_dict["val"],
                                              num_aux_tokens, iteration_counter)
 
-                if (iteration_counter) % 250 == 0:
+                if (iteration_counter) % 5000 == 0:
                     ckpt_save_path = self.ckpt_manager.save()
                     print(f'Saving checkpoint for iteration {iteration_counter} at {ckpt_save_path}')
 
@@ -280,3 +285,25 @@ def loss_function_window_size(real, pred, loss_object, padding_id, window_size, 
     #return tf.reduce_sum(loss_, axis=1) / tf.reduce_sum(mask, axis=1)
     #return tf.reduce_sum(loss_) / tf.reduce_sum(mask)
     return tf.reduce_sum(loss_), tf.reduce_sum(mask)
+
+class CustomTransformerScheduleCompressiveTransformer(tf.keras.optimizers.schedules.LearningRateSchedule):
+    # https://www.tensorflow.org/text/tutorials/transformer
+    def __init__(self, start_lr=0.000001, warmup_to_lr=0.0003, decay_lr=0.000001, warmup_steps=4000, decay_steps=100000):
+        super(CustomTransformerScheduleCompressiveTransformer, self).__init__()
+
+        self.start_lr = start_lr
+        self.warmup_to_lr = warmup_to_lr
+        self.decay_lr = decay_lr
+
+        self.warmup_steps = warmup_steps
+        self.decay_steps = decay_steps
+
+        self.warmup_increment = warmup_to_lr-start_lr / warmup_steps
+        self.decay_decrement = warmup_to_lr-decay_lr / decay_steps
+
+    def __call__(self, step):
+        # does step start at 1 or 0? below it assumes it starts at 0.
+        lr = tf.cond(tf.math.less_equal(tf.cast(step, dtype=tf.dtypes.int32), tf.convert_to_tensor([self.warmup_steps]))[0],
+                lambda: self.start_lr + self.warmup_increment * step,
+                lambda: self.warmup_to_lr - self.decay_decrement * (step-self.warmup_steps))
+        return lr
