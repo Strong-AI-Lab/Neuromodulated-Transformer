@@ -2,7 +2,7 @@
 File name: Decoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 10/08/21
+Data last modified: 12/08/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -25,6 +25,8 @@ class DecoderLayer(tf.keras.layers.Layer):
         max_seq_len: (int) The maximum sequence length of the input. (always pad to this length) \n
         nm_attn: (bool) If we are to gate in a context dependant manner during the calculation of attention. \n
         nm_eol: (bool) If we are to gate in a context dependant manner at the end of each layer. \n
+        stop_grad_gating: (bool) True if the gradient is only allowed to backpropagate through the last layer for gating;
+                False otherwise all places where gating occurs is allowed to be backpropagated, not just the last layer. \n
         mha1: Multi-head attention 1 (no encoder influence; attends solely to itself). \n
         mha2: (NOTE: has been removed) Multi-head attention 1 (encoder influence; attends the decoder's input to the encoder's output). \n
         ffn: Feed forward network. \n
@@ -36,7 +38,7 @@ class DecoderLayer(tf.keras.layers.Layer):
             and layer normalization.
     '''
 
-    def __init__(self, d_model, num_heads, dff, max_seq_len, rate=0.1, nm_attn=False, nm_eol=False):
+    def __init__(self, d_model, num_heads, dff, max_seq_len, rate=0.1, nm_attn=False, nm_eol=False, stop_grad_gating=True, rel_pos_emb=True):
         '''
         Function: __init__ \n
         Description: Initializes a decoder layer with the passed parameters. \n
@@ -50,13 +52,17 @@ class DecoderLayer(tf.keras.layers.Layer):
             nm_attn: (bool) True if context dependant gating is to occur for the attention calculation (from nm_network);
                 False otherwise. Defaults to False. \n
             nm_eol: (bool) True if context dependant gating is to occur at the end of each layer (eol) (from nm_network);
-                False otherwise. Defaults to False.
+                False otherwise. Defaults to False. \n
+            stop_grad_gating: (bool) True if the gradient is only allowed to backpropagate through the last layer for gating;
+                False otherwise all places where gating occurs is allowed to be backpropagated, not just the last layer.
+            rel_pos_emb: (bool) True if relative position embeddings are to be used; False otherwise (i.e. absolute position embeddings)
         '''
         super(DecoderLayer, self).__init__()
 
         self.max_seq_len = max_seq_len
         self.nm_attn = nm_attn
         self.nm_eol = nm_eol
+        self.stop_grad_gating = stop_grad_gating
 
         # d_model, num_heads, max_seq_len, nm_gating=False
         self.mha1 = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=nm_attn)
@@ -74,7 +80,6 @@ class DecoderLayer(tf.keras.layers.Layer):
 
         if self.nm_eol:
             self.dense_eol = tf.keras.layers.Dense(d_model, activation='sigmoid')
-            self.eol_dropout = tf.keras.layers.Dropout(rate)
 
     def call(self, x, training, mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
         '''
@@ -93,23 +98,19 @@ class DecoderLayer(tf.keras.layers.Layer):
         '''
         assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
+
+
         if nm_inp_gating_attn is not None:
             assert self.nm_attn, f"If nm_inp_gating_attn is not None, then nm_attn should be set to True, got {self.nm_attn}!"
             nm_inp_gating_attn = nm_inp_gating_attn[:,-x.shape[1]:, -x.shape[1]:] # remove global_auxiliary tokens.
         else: assert not self.nm_attn, f"If nm_inp_gating_attn is None then, nm_attn should be set to False, got {self.nm_attn}"
 
         x_ = self.layernorm1(x)
-        attn1, attn_weights_block1 = self.mha1(x_, x_, x_, nm_inp_gating=nm_inp_gating_attn, mask=mask)
+        attn1, attn_weights_block1 = self.mha1(x_, x_, x_,
+                                               nm_inp_gating=tf.stop_gradient(nm_inp_gating_attn) if self.stop_grad_gating else nm_inp_gating_attn,
+                                               mask=mask)
         attn1 = self.dropout1(attn1, training=training)
         out1 = x + attn1
-
-        #out2, attn_weights_block2 = None, None
-        #if enc_output is not None: # i.e. run through as normal.
-        #    attn2, attn_weights_block2 = self.mha2(enc_output, enc_output, out1, nm_inp_gating=None, mask=mha2_mask)
-        #    attn2 = self.dropout2(attn2, training=training)
-        #    out2 = self.layernorm2(out1 + attn2)
-        #else: # skip this attention sub-component.
-        #    out2 = out1
 
         out1_ = self.layernorm2(out1)
         out2 = self.ffn(out1_) # change to out2 instead of out1 if take input from the encoder.
@@ -118,8 +119,7 @@ class DecoderLayer(tf.keras.layers.Layer):
 
         if nm_inp_gating_eol is not None:
             assert self.nm_eol, f"If nm_inp_gating_eol is not None, then nm_eol should be set to True, got {self.nm_eol}!"
-            nm_inp_gating_eol = self.dense_eol(nm_inp_gating_eol[:,-self.max_seq_len:,:]) #tf.math.sigmoid(nm_inp_gating_eol)
-            nm_inp_gating_eol = self.eol_dropout(nm_inp_gating_eol, training=training)
+            nm_inp_gating_eol = self.dense_eol(tf.stop_gradient(nm_inp_gating_eol[:,-self.max_seq_len:,:]) if self.stop_grad_gating else nm_inp_gating_eol[:,-self.max_seq_len:,:]) #tf.math.sigmoid(nm_inp_gating_eol)
             out2 = nm_inp_gating_eol * out2
 
         return out2, attn_weights_block1
@@ -143,7 +143,7 @@ class Decoder(tf.keras.layers.Layer):
     '''
 
     def __init__(self, num_layers, d_model, num_heads, dff, max_seq_len, target_vocab_size, max_position_encoding=10000,
-                 rate=0.1, nm_attn=False, nm_eol=False):
+                 rate=0.1, nm_attn=False, nm_eol=False, stop_grad_gating=True, rel_pos_emb=True):
         '''
         Function: __init__ \n
         Description: Initialization of the decoder class. \n
@@ -161,7 +161,9 @@ class Decoder(tf.keras.layers.Layer):
             nm_attn: (bool) True if context dependant gating is to occur for the attention calculation (from nm_network);
                 False otherwise. Defaults to False. \n
             nm_eol: (bool) True if context dependant gating is to occur at the end of each layer (eol) (from nm_network);
-                False otherwise. Defaults to False.
+                False otherwise. Defaults to False. \n
+            stop_grad_gating: (bool) True if the gradient is only allowed to backpropagate through the last layer for gating;
+                False otherwise all places where gating occurs is allowed to be backpropagated, not just the last layer.
         '''
         super(Decoder, self).__init__()
 
@@ -171,6 +173,7 @@ class Decoder(tf.keras.layers.Layer):
         self.num_layers = num_layers
         self.d_model = d_model
         self.max_seq_len = max_seq_len
+        self.rel_pos_emb = rel_pos_emb
 
         # possible values are ["n_layers", "one"]
         self.mode = "n_layers"
@@ -180,7 +183,11 @@ class Decoder(tf.keras.layers.Layer):
         self.pos_encoding = positional_encoding(max_position_encoding, d_model)
 
         self.decoder_layers = [DecoderLayer(d_model, num_heads, dff, max_seq_len,
-                                            rate, nm_attn, nm_eol) for _ in range(num_layers)]
+                                            rate, nm_attn, nm_eol, stop_grad_gating=stop_grad_gating,
+                                            rel_pos_emb=rel_pos_emb) for _ in range(num_layers-1)] + \
+                              [DecoderLayer(d_model, num_heads, dff, max_seq_len,
+                                            rate, nm_attn, nm_eol, stop_grad_gating=False,
+                                            rel_pos_emb=rel_pos_emb)] # the gradient should never be stopped here, only potentially in the first N-1 layers.
 
         self.dropout = tf.keras.layers.Dropout(rate)
 
@@ -208,10 +215,10 @@ class Decoder(tf.keras.layers.Layer):
             x = self.embedding(x)
             # increase the embedding values so that position encoding doesn't completely remove the meaning of the words.
             # in practice for a dim of 512, 22.63 is what x is multiplied by.
-            x *= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
-            x += self.pos_encoding[:, :seq_len, :]
-            # TODO: consider if normalization needs to occur here?
-            x /= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
+            if not self.rel_pos_emb:
+                x *= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
+                x += self.pos_encoding[:, :seq_len, :]
+                x /= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
             x = self.dropout(x, training=training)
 
         attention_weights = dict()

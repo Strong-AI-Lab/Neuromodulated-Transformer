@@ -2,7 +2,7 @@
 File name: load_wikitext.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 17/07/21
+Data last modified: 06/08/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -182,8 +182,7 @@ class load_wikitext103:
                 yield tar_inp, tar_real, nm_inp
 
     def sliding_window_article_iterator(self):
-        # this is a naive way to go about it.
-        # shufle, pad, nm_aux
+
         nm_aux_tok = []
         for word in self.aux_tok:
             w = self.tokenizer.encode_single(word)
@@ -241,10 +240,100 @@ class load_wikitext103:
                     yield tar_inp, tar_real, nm_inp, tf.zeros((1), dtype=tf.dtypes.int64)
                     # 0 indicates that we are not at the first sentence in the article. (we should calculate the loss only for the last sliding_window tokens)
 
-    def get_tf_dataset_generator(self, process_strategy, shuffle=False, pad=True, sliding_window=None, *nm_aux_tokens):
+    def document_batch_oriented_iterator(self):
+
+        nm_aux_tok = []
+        for word in self.aux_tok:
+            w = self.tokenizer.encode_single(word)
+            if len(w) > 1:
+                raise Exception(
+                    f"{word} should only have on id associated with it in the tokenizer. Something went wrong!")
+            else:
+                w = w[0]
+            nm_aux_tok.append(w)
+
+        keys = list(self.data_dict.keys())
+        # print(keys)
+        if self.shuffle:
+            random.shuffle(keys)  # shuffles inplace.
+
+        start_end_index = [[0, self.max_seq_len] for _ in range(self.batch_size)] # each item in a batch corresponds to a document.
+
+        s = 0
+        e = self.batch_size
+        while True:
+            do_break = False
+
+            sampled_keys = []
+            key_articles = []
+
+            if e > len(keys):
+                do_break = True
+                e = len(keys)
+            for i in range(s, e):
+                sampled_keys.append(keys[i])
+            s = e
+            e =+ self.batch_size
+
+            c = -1
+            while True:
+                break_ = 0
+                c = c+1 if c < 10 else c # no need to go over 10 for c.
+                for i in range(len(sampled_keys)):
+                    if c == 0: key_articles.append(self.tokenizer.encode_single(self.data_dict[sampled_keys[i]])) # only need to do this once, hence, why the condition.
+                    # article_ids = article_ids["input_ids"]
+                    # TODO: add reset memory option tensor to return? or find another way to find out when to reset.
+                    tar_inp = None
+                    nm_tar_inp = None
+                    tar_real = None
+                    article_len = len(key_articles[i])
+
+                    if start_end_index[i][0] >= article_len-1:
+                        tar_inp = [self.pad_tok_id for _ in range(self.max_seq_len)]
+                        tar_real = [self.pad_tok_id for _ in range(self.max_seq_len)]
+                        nm_inp = nm_aux_tok + tar_inp
+
+                        tar_inp = tf.cast(tf.convert_to_tensor(np.asarray(tar_inp)), dtype=tf.dtypes.int64)
+                        tar_real = tf.cast(tf.convert_to_tensor(np.asarray(tar_real)), dtype=tf.dtypes.int64)
+                        nm_inp = tf.cast(tf.convert_to_tensor(np.asarray(nm_inp)), dtype=tf.dtypes.int64)
+
+                        break_ += 1
+                        clear_memory = tf.ones((1), dtype=tf.dtypes.int64) if c == 0 else tf.zeros((1), dtype=tf.dtypes.int64)
+                        yield tar_inp, tar_real, nm_inp, clear_memory
+                    else:
+                        if start_end_index[i][1] < article_len-1: # start_end_index[i][1] is the end_index [0] is the start index.
+                            tar_inp = key_articles[i][start_end_index[i][0]:start_end_index[i][1]]
+                            tar_real = key_articles[i][start_end_index[i][0]+1:start_end_index[i][1]+1]
+                        else:
+                            tar_inp = key_articles[i][start_end_index[i][0]:article_len-1]  # -1 so there is an output token for the target.
+                            tar_real = key_articles[i][start_end_index[i][0]+1:article_len]  # i.e. shifted to the right.
+
+                        if self.pad:
+                            tar_inp = tar_inp + [self.pad_tok_id for _ in range(self.max_seq_len - len(tar_inp))]
+                            tar_real = tar_real + [self.pad_tok_id for _ in range(self.max_seq_len - len(tar_real))]
+
+                        nm_inp = nm_aux_tok + tar_inp
+
+                        tar_inp = tf.cast(tf.convert_to_tensor(np.asarray(tar_inp)), dtype=tf.dtypes.int64)
+                        tar_real = tf.cast(tf.convert_to_tensor(np.asarray(tar_real)), dtype=tf.dtypes.int64)
+                        nm_inp = tf.cast(tf.convert_to_tensor(np.asarray(nm_inp)), dtype=tf.dtypes.int64)
+
+                        start_end_index[i][0] = start_end_index[i][1]
+                        start_end_index[i][1] += self.max_seq_len
+
+                        clear_memory = tf.ones((1), dtype=tf.dtypes.int64) if c == 0 else tf.zeros((1), dtype=tf.dtypes.int64)
+                        yield tar_inp, tar_real, nm_inp, clear_memory
+
+                if break_ >= self.batch_size: break # only break when all articles are finished, if one isn't then the others will be padded.
+                else: break_ = 0
+
+            if do_break: break
+
+    def get_tf_dataset_generator(self, process_strategy, shuffle=False, pad=True, sliding_window=None, batch_size=None, *nm_aux_tokens):
 
         self.shuffle = shuffle
         self.pad = pad
+        self.batch_size = batch_size
 
         if len(nm_aux_tokens) > 0:
             for word in nm_aux_tokens:
@@ -269,6 +358,13 @@ class load_wikitext103:
                                                                      tf.dtypes.int64))
         elif process_strategy == "default_str_tok": # note: needed for my reading strategies later.
             pass
+        elif process_strategy == "document_batch_oriented":
+            self.sliding_window = sliding_window
+            generator = tf.data.Dataset.from_generator(self.document_batch_oriented_iterator,
+                                                       output_types=(tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64))
         else: raise Exception(f"Invalid processing strategy: {process_strategy}")
 
         return generator
@@ -292,19 +388,20 @@ if __name__ == "__main__":
     #load_data = [True, "/large_data/wikitext-103/val_test_v2.txt"]
     #wiki_loader = load_wikitext103V2(filepath=filepath, tokenizer=tokenizer, end_tok=end_tok, pad_tok=pad_tok, strategy=strategy,
     #                                 load_data=load_data)
-    process_strategy = "sliding_window_article"
+    process_strategy = "document_batch_oriented"
     shuffle = False
     pad = True
-    generator = wiki_loader.get_tf_dataset_generator(process_strategy, shuffle, pad, 100, "<lm>", "<confidence>")
+    batch_size = 2
+    generator = wiki_loader.get_tf_dataset_generator(process_strategy, shuffle, pad, 24, batch_size=batch_size).batch(batch_size)
     counter = 0
-    for batch, (inp, tar, nm, item) in enumerate(generator):
+    for batch, (inp, tar, nm, clear_mem) in enumerate(generator):
         print(f"batch: {batch}")
-        print(f"inp.shape: {inp.shape} \t inp:{tokenizer.decode(inp)} \n"
-              f"nm.shape: {nm.shape} \t nm: {tokenizer.decode(nm)} \n"
-              f"tar.shape: {tar.shape} \t tar: {tokenizer.decode(tar)} \n"
-              f"item: {item} \n")
+        print(f"inp.shape: {inp.shape} \t inp:{tokenizer.decode(inp[0,:])} \n"
+              f"nm.shape: {nm.shape} \t nm: {tokenizer.decode(nm[0,:])} \n"
+              f"tar.shape: {tar.shape} \t tar: {tokenizer.decode(tar[0,:])} \n"
+              f"clear memory: {clear_mem}")
         counter += 1
-        if counter == 20: break
+        if counter == 3: break
     '''
     process_strategy = "default_tokenize"
     shuffle = False

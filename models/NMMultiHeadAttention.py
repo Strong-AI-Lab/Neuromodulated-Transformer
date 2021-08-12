@@ -2,7 +2,7 @@
 File name: MultiHeadAttention.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 05/07/21
+Data last modified: 12/08/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -30,7 +30,7 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
             heads' tensors are concatenated together.
     '''
 
-    def __init__(self, d_model, num_heads, max_seq_len, nm_gating=False):
+    def __init__(self, d_model, num_heads, max_seq_len, nm_gating=False, rel_pos_emb=True):
         '''
         Function: __init__ \n
         Description: Initializes the multi-head attention layer with the passed parameters. \n
@@ -39,6 +39,7 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
             num_heads: (int) The number of heads in this multi-head attention layer. \n
             max_seq_len: (int) The maximum sequence length to be passed as input. \n
             nm_gataing: (bool) True if context dependant gating is to occur; False otherwise. Defaults to False.
+            rel_pos_emb: (bool) True if relative position embeddings are to be used; False otherwise (i.e. absolute position embeddings)
         '''
         super(NMMultiHeadAttention, self).__init__()
         assert d_model % num_heads == 0, f"The number of heads is incompatible with the dimension of the model \n" \
@@ -57,6 +58,10 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
         self.nm_gate_logits = None
         if self.nm_gating:
             self.nm_gate_logits = [tf.keras.layers.Dense(self.max_seq_len) for _ in range(num_heads)]
+
+        self.rel_position_matrix = None
+        if rel_pos_emb:
+            self.rel_position_matrix = tf.Variable(tf.initializers.GlorotUniform(shape=(self.max_seq_len, self.max_seq_len)))
 
         self.dense = tf.keras.layers.Dense(d_model)
 
@@ -148,6 +153,9 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
         dk = tf.cast(tf.shape(k)[-1], tf.float32) # i.e. get the depth.
         scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
 
+        if self.rel_position_matrix is not None:
+            scaled_attention_logits = scaled_attention_logits + self.rel_position_matrix
+
         # add the mask to the scaled tensor.
         if mask is not None:
             scaled_attention_logits += (mask * -1e9)
@@ -188,6 +196,9 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
         # scale matmul_qk
         dk = tf.cast(tf.shape(k)[-1], tf.float32)  # i.e. get the depth.
         scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
+
+        if self.rel_position_matrix is not None:
+            scaled_attention_logits = scaled_attention_logits + self.rel_position_matrix
 
         gated_attn_logits = None
         for i in range(self.num_heads):

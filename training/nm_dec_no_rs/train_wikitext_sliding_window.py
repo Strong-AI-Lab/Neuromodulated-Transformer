@@ -1,6 +1,6 @@
 import os
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices' # TODO test that this works.
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3,4,5,6" #"0,3,4,5,6,7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3,4,5,7" #"0,3,4,5,6,7"
 
 import sys
 sys.path.append("../..")
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     dff = d_model*2
     max_seq_len_dec, max_seq_len_nm = 1024, 1024
     target_vocab_size, nm_vocab_size = tokenizer.get_vocab_size_dec(), tokenizer.get_vocab_size_dec()
-    batch_size = 6*4 # last number is the number of gpus, first is the batch size per gpu.
+    batch_size = 4*4 # last number is the number of gpus, first is the batch size per gpu.
 
     parallel_layers = {}
     nm_attn, nm_eol = False, False

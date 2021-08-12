@@ -2,7 +2,7 @@
 File name: NMEncoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 10/08/21
+Data last modified: 12/08/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -33,7 +33,7 @@ class NMEncoderLayer(tf.keras.layers.Layer):
         dropout2: Dropout layer which occurs after the feed-forward layer and before the residual connection
             and layer normalization.
     '''
-    def __init__(self, d_model, num_heads, dff, max_seq_len, rate=0.1):
+    def __init__(self, d_model, num_heads, dff, max_seq_len, rate=0.1, rel_pos_emb=True):
         '''
         Function: __init__ \n
         Description: Initializes a neuromodulation encoder layer with the passed parameters. \n
@@ -44,12 +44,13 @@ class NMEncoderLayer(tf.keras.layers.Layer):
             max_seq_len: (int) The maximum sequence length to be passed as input. \n
             rate: (float) The dropout rate for dropout layers throughout the layer.
                 Defaults to 0.1. \n
+            rel_pos_emb: (bool) True if relative position embeddings are to be used; False otherwise (i.e. absolute position embeddings)
         '''
         super(NMEncoderLayer, self).__init__()
 
         self.max_seq_len = max_seq_len
 
-        self.mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False)
+        self.mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False, rel_pos_emb=rel_pos_emb)
         self.ffn = FeedForwardNetwork(init_vanilla_ffn(d_model, dff))
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.
@@ -102,7 +103,7 @@ class NMEncoder(tf.keras.layers.Layer):
             has been applied.
     '''
     def __init__(self, num_layers, d_model, num_heads, dff, max_seq_len, input_vocab_size, max_position_encoding=10000,
-                 rate=0.1, parallel_layers={}):
+                 rate=0.1, parallel_layers={}, rel_pos_emb=True):
         '''
         Function: __init__ \n
         Description: Initialization of the encoder class. \n
@@ -132,6 +133,7 @@ class NMEncoder(tf.keras.layers.Layer):
         self.num_layers = num_layers
         self.d_model = d_model
         self.max_seq_len = max_seq_len
+        self.rel_pos_emb = rel_pos_emb
 
         # possible values are ["n_layers", "one"]
         self.mode = "n_layers"
@@ -141,7 +143,7 @@ class NMEncoder(tf.keras.layers.Layer):
         self.pos_encoding = positional_encoding(max_position_encoding, d_model)
 
         self.encoder_layers = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len,
-                                            rate) for _ in range(num_layers)]
+                                            rate, rel_pos_emb=rel_pos_emb) for _ in range(num_layers)]
 
         self.dropout = tf.keras.layers.Dropout(rate)
 
@@ -149,19 +151,29 @@ class NMEncoder(tf.keras.layers.Layer):
 
         for key, layer in parallel_layers.items(): # modify layer to be a list of size 2. [layer name (str), The number of layers (int)]
             if layer[0] == "EncoderLayer":
-                self.parallel_layers[key] = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1])] # TODO: here add supuport for multiple...
+                self.parallel_layers[key] = [[NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1])]]
+                # below corresponds to the generation of output predictions used as an auxiliary loss.
+                self.parallel_layers[key].append(tf.keras.layers.Dense(self.d_model) if layer[2] else None)
             elif layer[0] == "NMEncoderLayerNoRC":
-                self.parallel_layers[key] = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
-                                            [NMEncoderLayerNoRC(d_model, num_heads, dff, max_seq_len, rate)]
+                self.parallel_layers[key] = [[NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
+                                            [NMEncoderLayerNoRC(d_model, num_heads, dff, max_seq_len, rate)]]
+                # below corresponds to the generation of output predictions used as an auxiliary loss.
+                self.parallel_layers[key].append(tf.keras.layers.Dense(self.d_model) if layer[2] else None)
             elif layer[0] == "GateLayerAttn":
-                self.parallel_layers[key] = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
-                                            [GateLayerAttn(d_model, num_heads, dff, max_seq_len, rate)]
+                self.parallel_layers[key] = [[NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
+                                            [GateLayerAttn(d_model, num_heads, dff, max_seq_len, rate)]]
+                # below corresponds to the generation of output predictions used as an auxiliary loss.
+                self.parallel_layers[key].append(tf.keras.layers.Dense(self.d_model) if layer[2] else None)
             elif layer[0] == "MetacognitionSequenceLayer":
-                self.parallel_layers[key] = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
-                                            [MetacognitionSequenceLayer(d_model, num_heads, dff, max_seq_len, rate)]
+                self.parallel_layers[key] = [[NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
+                                            [MetacognitionSequenceLayer(d_model, num_heads, dff, max_seq_len, rate)]]
+                # below corresponds to the generation of output predictions used as an auxiliary loss.
+                self.parallel_layers[key].append(tf.keras.layers.Dense(self.d_model) if layer[2] else None)
             elif layer[0] == "MetacognitionSingleLayer":
-                self.parallel_layers[key] = [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
-                                            [MetacognitionSingleLayer(d_model, num_heads, dff, max_seq_len, rate)]
+                self.parallel_layers[key] = [[NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1]-1)] + \
+                                            [MetacognitionSingleLayer(d_model, num_heads, dff, max_seq_len, rate)]]
+                # below corresponds to the generation of output predictions used as an auxiliary loss.
+                self.parallel_layers[key].append(tf.keras.layers.Dense(self.d_model) if layer[2] else None)
 
     def call(self, x, training, mask, restrictions=[]):
         '''
@@ -182,12 +194,11 @@ class NMEncoder(tf.keras.layers.Layer):
 
         if self.counter == 0:
             x = self.embedding(x)
-            # increase the embedding values so that position encoding doesn't completely remove the meaning of the words.
-            # in practice for a dim of 512, 22.63 is what x is multiplied by.
-            x *= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
-            x += self.pos_encoding[:, :seq_len, :]
-            # TODO: consider if normalization needs to occur here?
-            x /= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
+
+            if not self.rel_pos_emb:
+                x *= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
+                x += self.pos_encoding[:, :seq_len, :]
+                x /= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
             x = self.dropout(x, training=training)
 
         attention_weights = dict()
@@ -210,11 +221,17 @@ class NMEncoder(tf.keras.layers.Layer):
                 #if key == "nm_eol_gate": x_dict[key] = layer(x, training, mask) # this will be a tuple containing the output (x, attn_weights)
                 #else: x_dict[key] = layer(tf.stop_gradient(x), training, mask) # only want the baseline network to be updated once.
                 # todo iterate through each layer
-                out, attn_weights = x, []
-                for l in layer:
-                    out, aw = l(out, training, mask)
+                out, out_no_grad, attn_weights= x, tf.stop_gradient(x), []
+                for l in layer[0]:
+                    out, aw = l[0](out, training, mask) # out.shape = (batch_size, seq_len, varies)
                     attn_weights.append(aw)
-                x_dict[key] = (out, attn_weights)  # this will be a tuple containing the output (x, attn_weights)
+                aux_pred = None
+                # run through again but with gradient cutoff from `base' layers
+                if layer[1] is not None:
+                    for l in layer[0]:
+                        out_no_grad, aw = l[0](out_no_grad, training, mask) # out.shape = (batch_size, seq_len, varies)
+                    aux_pred = l[1](out_no_grad) # modifies the last dimension to d_mod
+                x_dict[key] = (out, attn_weights, aux_pred)  # this will be a tuple containing the output (x, attn_weights)
             if len(x_dict.keys()) == 0: x_dict["default"] = (x, attention_weights) # i.e. return x if the dictionary is empty.
         return x_dict
 
