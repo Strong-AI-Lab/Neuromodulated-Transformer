@@ -70,7 +70,7 @@ class SlidingWindowTrain(ParentTrainNL):
             loss_ = loss/size
             aux_loss_ = loss_
             for aloss in aux_losses:
-                aux_loss_ += (aloss * lambda_) # penalty to the auxiliary loss
+                aux_loss_ += aloss * lambda_ # penalty to the auxiliary loss
 
         # TODO: check that below trains like I think it does, i.e. the auxiliary losses update as they should...
         gradients = tape.gradient(aux_loss_, self.model.trainable_variables)
@@ -130,7 +130,7 @@ class SlidingWindowTrain(ParentTrainNL):
                 if "bpc" in dict_.keys():
                     bpc = dict_["bpc"]
 
-                if iteration_counter % 250 == 0:
+                if iteration_counter % 100 == 0:
                     print(f'Iteration {iteration_counter} Epoch {e+1} Batch {batch} Loss {loss_:.4f}'
                           f' Perplexity {perp:.4f} Bits Per Word (bpw) {bpc:.4f}')
                 batch += 1
@@ -142,7 +142,7 @@ class SlidingWindowTrain(ParentTrainNL):
                         self._run_validation(e, save_filepath_val, data_dict["val"],
                                              num_aux_tokens, iteration_counter)
 
-                if (iteration_counter) % 5000 == 0:
+                if (iteration_counter) % 2500 == 0:
                     ckpt_save_path = self.ckpt_manager.save()
                     print(f'Saving checkpoint for iteration {iteration_counter} at {ckpt_save_path}')
 
@@ -198,7 +198,7 @@ class SlidingWindowTrain(ParentTrainNL):
     def val_step(self, tar_inp, tar_real, nm_inp, num_aux_tokens, isStart):
 
         loss, size = 0, 0
-        predictions, _, _ = self.model(tar_inp, nm_inp, training=False, padding_id=self.padding_id,
+        predictions, _, _, _ = self.model(tar_inp, nm_inp, training=False, padding_id=self.padding_id,
                                        num_aux_tok=num_aux_tokens)  # ret (output, attention weights)
         loss, size = self.loss_function(tar_real, predictions, self.loss_object, self.padding_id,
                                         self.window_size_val, isStart, domask2=True)

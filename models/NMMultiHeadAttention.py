@@ -61,7 +61,7 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
 
         self.rel_position_matrix = None
         if rel_pos_emb:
-            self.rel_position_matrix = tf.Variable(tf.initializers.GlorotUniform(shape=(self.max_seq_len, self.max_seq_len)))
+            self.rel_position_matrix = tf.Variable(tf.initializers.GlorotUniform()(shape=(self.max_seq_len, self.max_seq_len)))
 
         self.dense = tf.keras.layers.Dense(d_model)
 

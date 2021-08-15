@@ -241,7 +241,7 @@ class load_wikitext103:
                     # 0 indicates that we are not at the first sentence in the article. (we should calculate the loss only for the last sliding_window tokens)
 
     def document_batch_oriented_iterator(self):
-
+        print(f"Not fully tested yet!")
         nm_aux_tok = []
         for word in self.aux_tok:
             w = self.tokenizer.encode_single(word)
@@ -329,7 +329,7 @@ class load_wikitext103:
 
             if do_break: break
 
-    def get_tf_dataset_generator(self, process_strategy, shuffle=False, pad=True, sliding_window=None, batch_size=None, *nm_aux_tokens):
+    def get_tf_dataset_generator(self, process_strategy, shuffle=False, pad=True, sliding_window=None, batch_size=None, nm_aux_tokens=[]):
 
         self.shuffle = shuffle
         self.pad = pad

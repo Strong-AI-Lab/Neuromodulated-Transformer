@@ -223,14 +223,14 @@ class NMEncoder(tf.keras.layers.Layer):
                 # todo iterate through each layer
                 out, out_no_grad, attn_weights= x, tf.stop_gradient(x), []
                 for l in layer[0]:
-                    out, aw = l[0](out, training, mask) # out.shape = (batch_size, seq_len, varies)
+                    out, aw = l(out, training, mask) # out.shape = (batch_size, seq_len, varies)
                     attn_weights.append(aw)
                 aux_pred = None
                 # run through again but with gradient cutoff from `base' layers
-                if layer[1] is not None:
+                if layer[1] is not None and training:
                     for l in layer[0]:
-                        out_no_grad, aw = l[0](out_no_grad, training, mask) # out.shape = (batch_size, seq_len, varies)
-                    aux_pred = l[1](out_no_grad) # modifies the last dimension to d_mod
+                        out_no_grad, aw = l(out_no_grad, training, mask) # out.shape = (batch_size, seq_len, varies)
+                    aux_pred = layer[1](out_no_grad) # modifies the last dimension to d_mod
                 x_dict[key] = (out, attn_weights, aux_pred)  # this will be a tuple containing the output (x, attn_weights)
             if len(x_dict.keys()) == 0: x_dict["default"] = (x, attention_weights) # i.e. return x if the dictionary is empty.
         return x_dict
@@ -522,28 +522,32 @@ if __name__ == "__main__":
     # GateLayerAttn
     # NMEncoderLayer
     parallel_layers = {}
-    parallel_layers["nm_attn_gate_lm"] = "GateLayerAttn"
-    parallel_layers["nm_eol_gate_lm"] = "NMEncoderLayerNoRC" #"EncoderLayer"
-    parallel_layers["unk_reading_strategy"] = "MetacognitionSequenceLayer"
-    parallel_layers["highlighting_reading_strategy"] = "MetacognitionSingleLayer"
-    parallel_layers["aoi_reading_strategy"] = "MetacognitionSingleLayer"
-    parallel_layers["re_read_reading_strategy"] = "MetacognitionSingleLayer"
-    parallel_layers["paraphrase_reading_strategy"] = "MetacognitionSingleLayer"
-    parallel_layers["summarization_reading_strategy"] = "MetacognitionSingleLayer"
+    parallel_layers["nm_attn_gate_lm"] = ["GateLayerAttn", 2, True]
+    parallel_layers["nm_eol_gate_lm"] = ["NMEncoderLayerNoRC", 2, True] #"EncoderLayer"
+    parallel_layers["unk_reading_strategy"] = ["MetacognitionSequenceLayer", 2, False]
+    parallel_layers["highlighting_reading_strategy"] = ["MetacognitionSingleLayer", 2, False]
+    parallel_layers["aoi_reading_strategy"] = ["MetacognitionSingleLayer", 2, False]
+    parallel_layers["re_read_reading_strategy"] = ["MetacognitionSingleLayer", 2, False]
+    parallel_layers["paraphrase_reading_strategy"] = ["MetacognitionSingleLayer", 2, False]
+    parallel_layers["summarization_reading_strategy"] = ["MetacognitionSingleLayer", 2, False]
 
     nm_encoder = NMEncoder(num_layers, d_model, num_heads, dff, max_seq_len, input_vocab_size,
-                           max_position_encoding, rate, parallel_layers)
+                           max_position_encoding, rate, parallel_layers, rel_pos_emb=True)
     nm_encoder.mode = "n_layers"
     # x, training, mask, restrictions=[]
     x = tf.random.uniform((batch_size, max_seq_len))
     training, mask = True, None
-    restrictions = ["unk_reading_strategy"]
+    #restrictions = ["unk_reading_strategy"]
+    restrictions = []
     dict_ = nm_encoder(x, training, mask, restrictions)
     print(len(dict_.keys()))
     #print(dict_)
-    for key, value in dict_.items():
-        print(f"{key}: {value[0].shape} \t {value[1].shape}")
+    #for key, value in dict_.items():
+        #print(f"Value[0]: {value[0]}")
+        #print(f"{key}: {value[0].shape} \t {value[1].shape}")
 
     print(f"nm_attn_gate_lm: {dict_['nm_attn_gate_lm'][0]}")
+    print(f"nm_attn_gate_lm_aux: {dict_['nm_attn_gate_lm'][2]}")
     print(f"unk: {dict_['unk_reading_strategy'][0]}")
+    print(f"unk_aux: {dict_['unk_reading_strategy'][0]}")
     print(f"highlighting: {dict_['paraphrase_reading_strategy'][0]}")

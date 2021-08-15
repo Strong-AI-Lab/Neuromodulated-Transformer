@@ -33,7 +33,7 @@ class NMTransformer(tf.keras.Model):
 
     def __init__(self, num_layers_dec, num_layers_nm, d_model, num_heads, dff, max_seq_len_dec, max_seq_len_nm,
                  target_vocab_size, nm_vocab_size, max_position_encoding_dec=10000, max_position_encoding_nm=10000,
-                 rate=0.1, nm_attn=False, nm_eol=False, parallel_layers={}, rel_pos_emb=True):
+                 rate=0.1, nm_attn=False, nm_eol=False, parallel_layers={}, rel_pos_emb=True, num_aux_losses=0):
         '''
         Function: __init__ \n
         Description: Initializes the Neuromodulated Transformer (decoder version) with the passed parameters. \n
@@ -56,6 +56,9 @@ class NMTransformer(tf.keras.Model):
                                     max_position_encoding_nm, rate, parallel_layers, rel_pos_emb=rel_pos_emb)
 
         self.final_layer = tf.keras.layers.Dense(target_vocab_size)
+        self.aux_final_layer = []
+        for i in range(num_aux_losses):
+            self.aux_final_layer.append(tf.keras.layers.Dense(target_vocab_size))
 
     def call(self, dec_inp, nm_inp, training, padding_id=0, num_aux_tok=0, nm_mask=None, dec_mask=None):
         '''
@@ -81,8 +84,13 @@ class NMTransformer(tf.keras.Model):
         # get a list of aux_predictions. Note: support is only for aux predictions for the actual decoder answer. Later add support for this.
         # doing it this way means that it doesn't matter which component any came from as the graph that computes gradients keeps track of it.
         aux_pred_list = list()
+        counter = 0
         for key in output_dict.keys():
-            aux_pred_list.append(tf.nn.softmax(output_dict[key][2][:,-self.decoder.max_seq_len:,:], axis=-1))
+            if output_dict[key][2] is not None:
+                f = output_dict[key][2][:, -self.decoder.max_seq_len:, :]
+                f = tf.nn.softmax(self.aux_final_layer[counter](f), axis=-1)
+                aux_pred_list.append(f)
+                counter += 1
 
         final_output = self.final_layer(dec_output) # (batch_size, seq_len, vocab_size)
 

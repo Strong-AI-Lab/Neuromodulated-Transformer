@@ -1,6 +1,6 @@
 import os
-os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices' # TODO test that this works.
-os.environ["CUDA_VISIBLE_DEVICES"] = "3,4,5,7" #"0,3,4,5,6,7"
+os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
+os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6,7"
 
 import sys
 sys.path.append("../..")
@@ -18,7 +18,7 @@ from models.AttentionMasks import *
 from models.NMMultiHeadAttention import NMMultiHeadAttention
 from models.FeedForwardNetwork import FeedForwardNetwork
 from models.PositionEncoding import get_angles, positional_encoding
-from models.NMTransformerDec import NMTransformerDec
+from models.NMTransformer import NMTransformer
 from text_processing.tokenizer import Tokenizer
 from transformers import TransfoXLTokenizer
 from load_datasets.language_modelling.load_wikitext import *
@@ -44,16 +44,17 @@ if __name__ == "__main__":
     tokenizer.add_tokens_list(["<dec>", "<lm>", "<confidence>"], update_vocab_size_dec=True) 
 
     num_layers_dec, num_layers_nm = 12, 6
-    d_model, num_heads = 768, 12
+    d_model, num_heads = 512, 8
     dff = d_model*2
-    max_seq_len_dec, max_seq_len_nm = 1024, 1024
+    max_seq_len_dec, max_seq_len_nm = 512, 512
     target_vocab_size, nm_vocab_size = tokenizer.get_vocab_size_dec(), tokenizer.get_vocab_size_dec()
-    batch_size = 4*4 # last number is the number of gpus, first is the batch size per gpu.
+    batch_size = 6*4 # last number is the number of gpus, first is the batch size per gpu.
 
     parallel_layers = {}
+    rel_pos_emb = True
     nm_attn, nm_eol = False, False
-    parallel_layers["nm_attn_gate"], nm_attn = ["GateLayerAttn", 3], True
-    parallel_layers["nm_eol_gate"], nm_eol = ["EncoderLayer", 3], True
+    parallel_layers["nm_attn_gate"], nm_attn = ["GateLayerAttn", 3, False], True # True inside the parenthesis mean aux loss + additional layers are to be created for it.
+    parallel_layers["nm_eol_gate"], nm_eol = ["EncoderLayer", 3, False], True
 
     loss_object = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False, # softmax is to be applied before hand.
                                                                 reduction='none')
@@ -72,18 +73,18 @@ if __name__ == "__main__":
 
     if strategy is not None:
         with strategy.scope():
-            transformer = NMTransformerDec(num_layers_dec, num_layers_nm, d_model, num_heads, dff, max_seq_len_dec,
+            transformer = NMTransformer(num_layers_dec, num_layers_nm, d_model, num_heads, dff, max_seq_len_dec,
                                            max_seq_len_nm, target_vocab_size, nm_vocab_size, max_position_encoding_dec=2000,
                                            max_position_encoding_nm=2000, rate=0.1, nm_attn=nm_attn, nm_eol=nm_eol,
-                                           parallel_layers=parallel_layers)
+                                           parallel_layers=parallel_layers, rel_pos_emb=rel_pos_emb)
             optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.999)
             #optimizer = tf.keras.optimizers.SGD(learning_rate, momentum=0.1)
     else:
-        transformer = NMTransformerDec(num_layers_dec, num_layers_nm, d_model, num_heads, dff, max_seq_len_dec,
+        transformer = NMTransformer(num_layers_dec, num_layers_nm, d_model, num_heads, dff, max_seq_len_dec,
                                        max_seq_len_nm, target_vocab_size, nm_vocab_size,
                                        max_position_encoding_dec=2000,
                                        max_position_encoding_nm=2000, rate=0.1, nm_attn=nm_attn, nm_eol=nm_eol,
-                                       parallel_layers=parallel_layers)
+                                       parallel_layers=parallel_layers, rel_pos_emb=rel_pos_emb)
         optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.999)
 
     data_dict = {}
@@ -133,6 +134,6 @@ change to log softmax and initialize embedding layer to zero, so pad tokens are 
 Better performance if remove eol gating and just keep gating before the attention calculation. (so attend in a context dependant manner).
 
 Fix model and test all again...
-both nm_attn and eol_gating 768 dim and 1024 seq_len
+both nm_attn and eol_gating 768 dim and 1024 seq_len 
 '''
 
