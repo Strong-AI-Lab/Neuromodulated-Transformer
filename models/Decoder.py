@@ -79,7 +79,8 @@ class DecoderLayer(tf.keras.layers.Layer):
         #self.dropout3 = tf.keras.layers.Dropout(rate)
 
         if self.nm_eol:
-            self.dense_eol = tf.keras.layers.Dense(d_model, activation='sigmoid')
+            #self.dense_eol = tf.keras.layers.Dense(d_model, activation='sigmoid')
+            self.dense_eol = init_vanilla_ffn(d_model, dff) # not a dense layer, but naming here isn't accurate.
 
     def call(self, x, training, mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
         '''
@@ -119,11 +120,11 @@ class DecoderLayer(tf.keras.layers.Layer):
 
         if nm_inp_gating_eol is not None:
             assert self.nm_eol, f"If nm_inp_gating_eol is not None, then nm_eol should be set to True, got {self.nm_eol}!"
-            nm_inp_gating_eol = self.dense_eol(tf.stop_gradient(nm_inp_gating_eol[:,-self.max_seq_len:,:]) if self.stop_grad_gating else nm_inp_gating_eol[:,-self.max_seq_len:,:]) #tf.math.sigmoid(nm_inp_gating_eol)
+            nm_inp_gating_eol = tf.math.sigmoid(self.dense_eol(tf.stop_gradient(nm_inp_gating_eol[:,-self.max_seq_len:,:]) if self.stop_grad_gating else nm_inp_gating_eol[:,-self.max_seq_len:,:])) #tf.math.sigmoid(nm_inp_gating_eol)
             out2 = nm_inp_gating_eol * out2
 
         return out2, attn_weights_block1
-
+ 
 class Decoder(tf.keras.layers.Layer):
     '''
     Class: Decoder \n

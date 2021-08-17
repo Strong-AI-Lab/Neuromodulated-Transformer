@@ -10,6 +10,11 @@ Tensorflow version: 2
 import tensorflow as tf
 import numpy as np
 
+import sys
+sys.path.append("..")
+
+from models.FeedForwardNetwork import init_vanilla_ffn
+
 # Don't name MultiHeadAttention, otherwise error with training in tensorflow.
 class NMMultiHeadAttention(tf.keras.layers.Layer):
     '''
@@ -57,7 +62,9 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
 
         self.nm_gate_logits = None
         if self.nm_gating:
-            self.nm_gate_logits = [tf.keras.layers.Dense(self.max_seq_len) for _ in range(num_heads)]
+            #self.nm_gate_logits = [tf.keras.layers.Dense(self.max_seq_len) for _ in range(num_heads)]
+            self.nm_gate_logits = [init_vanilla_ffn(self.max_seq_len, d_model*2) for _ in range(num_heads)] # this does one for each head... overfitting?
+            #self.nm_gate_logits = init_vanilla_ffn(self.max_seq_len, d_model*2) # only one per layer...
 
         self.rel_position_matrix = None
         if rel_pos_emb:
@@ -203,7 +210,8 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
         gated_attn_logits = None
         for i in range(self.num_heads):
             # for each head multiply the head by it's associated dense layer.
-            z = self.nm_gate_logits[i](nm_inp_gating)
+            if isinstance(self.nm_gate_logits, list): z = self.nm_gate_logits[i](nm_inp_gating) # one for each head in current layer.
+            else: z = self.nm_gate_logits(nm_inp_gating) # one for all heads in current layer.
 
             # expand along dim 1 to match the scaled_attention_logits' num_heads dimension.
             if gated_attn_logits is None:

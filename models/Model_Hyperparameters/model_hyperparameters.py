@@ -39,7 +39,7 @@ class TestModel:
         self.tokenizer.add_tokens_list(["<s>", "</s>", "<pad>", "<dec>", "<lm>", "<confidence>"], update_vocab_size_dec=True)
 
         self.num_layers_dec = 12
-        self.num_layers_nm = 6
+        self.num_layers_nm = 9
         self.d_model = 512
         self.num_heads = 8
         self.dff = self.d_model*2
@@ -49,9 +49,9 @@ class TestModel:
         self.max_seq_len_nm = self.max_seq_len_dec + self.num_aux_tokens
 
         self.parallel_layers = dict()
-        self.parallel_layers["nm_attn_gate"] = ["GateLayerAttn", 3, True]  # True inside the parenthesis mean aux loss + additional layers are to be created for it.
+        self.parallel_layers["nm_attn_gate"] = ["GateLayerAttn", 3, False]  # True inside the parenthesis mean aux loss + additional layers are to be created for it. False, if no aux losses.
         self.parallel_layers["nm_eol_gate"] = ["EncoderLayer", 3, True]
-        self.num_aux_losses = 2 # the number of True values in the lists above.
+        self.num_aux_losses = 1 # the number of True values in the lists above.
 
         self.nm_attn = True
         self.nm_eol = True
@@ -63,6 +63,8 @@ class TestModel:
         self.rel_pos_emb = True
         self.max_position_encoding_dec = 2000
         self.max_position_encoding_nm = 2000
+
+        self.stop_grad_gating = True # True if only the last layer can backprogate errors back through the network.
 
         def __str__(self):
             return '''Initialization parameters of a model with a dimension size of 512 and a

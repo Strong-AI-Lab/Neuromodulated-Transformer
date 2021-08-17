@@ -1,7 +1,7 @@
 import os
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6,7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3,4,5,6"
 
 import sys
 
@@ -38,7 +38,6 @@ def get_generator(tokenizer, filepath="/large_data/wikitext-103/wiki.valid.token
                                    max_seq_len=max_seq_len)
 
     return wiki_loader.get_tf_dataset_generator(process_strategy, shuffle, pad, window_size, nm_aux_token).batch(batch_size)
-
 
 if __name__ == "__main__":
 
@@ -77,7 +76,8 @@ if __name__ == "__main__":
                                         max_position_encoding_nm=max_position_encoding_nm,
                                         rate=config.rate, nm_attn=nm_attn, nm_eol=nm_eol,
                                         parallel_layers=parallel_layers, rel_pos_emb=rel_pos_emb,
-                                        num_aux_losses=config.num_aux_losses)
+                                        num_aux_losses=config.num_aux_losses,
+                                        stop_grad_gating=config.stop_grad_gating)
             optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.999)
     else:
         transformer = NMTransformer(config.num_layers_dec, config.num_layers_nm, config.d_model,
@@ -87,13 +87,13 @@ if __name__ == "__main__":
                                     max_position_encoding_nm=max_position_encoding_nm,
                                     rate=config.rate, nm_attn=nm_attn, nm_eol=nm_eol,
                                     parallel_layers=parallel_layers, rel_pos_emb=rel_pos_emb,
-                                    num_aux_losses=config.num_aux_losses)
+                                    num_aux_losses=config.num_aux_losses,
+                                    stop_grad_gating=config.stop_grad_gating)
         optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.999)
 
     data_dict = {}
     data_dict["train"] = get_generator(filepath="/large_data/wikitext-103/wiki.train.tokens",
-                                       load_data=[True,
-                                                  "/large_data/wikitext-103/processed_data/train_heading_default_strategy.txt"],
+                                       load_data=[True, "/large_data/wikitext-103/processed_data/train_heading_default_strategy.txt"],
                                        batch_size=config.batch_size,
                                        process_strategy=process_strategy,
                                        window_size=max_seq_len_dec,
@@ -106,21 +106,21 @@ if __name__ == "__main__":
                                      load_data=[True, "/large_data/wikitext-103/processed_data/val_heading_default_strategy.txt"],
                                      batch_size=config.batch_size,
                                      process_strategy=process_strategy,
-                                     window_size=64, shuffle=False,
+                                     window_size=max_seq_len_dec, shuffle=False,
                                      max_seq_len=max_seq_len_dec,
                                      tokenizer = config.tokenizer)
     if strategy is not None:
         data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
 
     train_class = SlidingWindowTrain(transformer, optimizer, config.loss_object, loss_function_window_size, config.tokenizer,
-                                     checkpoint_path_recent="../../checkpoints/TestModel/",
+                                     checkpoint_path_recent="../../checkpoints/TestModel_updated/",
                                      checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
                                      recent_to_keep=50, load_recent=False, best_to_keep=5, load_best=False,
-                                     window_size_train=max_seq_len_dec, window_size_val=64)
+                                     window_size_train=max_seq_len_dec, window_size_val=max_seq_len_dec)
 
-    train_class.train_iteration(epoch_start=0, epoch_end=10,
-                                save_filepath_train="../../results/TestModel/",
-                                save_filepath_val="../../results/TestModel/",
+    train_class.train_iteration(epoch_start=0, epoch_end=5,
+                                save_filepath_train="../../results/TestModel_updated/",
+                                save_filepath_val="../../results/TestModel_updated/",
                                 data_dict=data_dict, num_aux_tokens=0)
 
 

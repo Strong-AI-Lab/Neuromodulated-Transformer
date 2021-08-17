@@ -33,7 +33,8 @@ class NMTransformer(tf.keras.Model):
 
     def __init__(self, num_layers_dec, num_layers_nm, d_model, num_heads, dff, max_seq_len_dec, max_seq_len_nm,
                  target_vocab_size, nm_vocab_size, max_position_encoding_dec=10000, max_position_encoding_nm=10000,
-                 rate=0.1, nm_attn=False, nm_eol=False, parallel_layers={}, rel_pos_emb=True, num_aux_losses=0):
+                 rate=0.1, nm_attn=False, nm_eol=False, parallel_layers={}, rel_pos_emb=True, num_aux_losses=0,
+                 stop_grad_gating=True):
         '''
         Function: __init__ \n
         Description: Initializes the Neuromodulated Transformer (decoder version) with the passed parameters. \n
@@ -47,7 +48,8 @@ class NMTransformer(tf.keras.Model):
         self.nm_eol = nm_eol
 
         self.decoder = Decoder(num_layers_dec, d_model, num_heads, dff, max_seq_len_dec, target_vocab_size,
-                               max_position_encoding_dec, rate, nm_attn, nm_eol, rel_pos_emb=rel_pos_emb)
+                               max_position_encoding_dec, rate, nm_attn, nm_eol, stop_grad_gating=stop_grad_gating,
+                               rel_pos_emb=rel_pos_emb)
 
         #if not(nm_attn or nm_eol): print("If both nm_attn and nm_eol are False then you are just running with a vanilla "
         #                                 "Decoder only transformer.")
