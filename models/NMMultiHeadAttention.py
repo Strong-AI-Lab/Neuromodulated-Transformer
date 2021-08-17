@@ -55,20 +55,18 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
         self.max_seq_len = max_seq_len
         self.nm_gating = nm_gating
         self.depth = d_model // num_heads
+        self.rel_pos_emb = rel_pos_emb
 
         self.wq = tf.keras.layers.Dense(d_model)
         self.wk = tf.keras.layers.Dense(d_model)
         self.wv = tf.keras.layers.Dense(d_model)
 
-        self.nm_gate_logits = None
-        if self.nm_gating:
-            #self.nm_gate_logits = [tf.keras.layers.Dense(self.max_seq_len) for _ in range(num_heads)]
-            self.nm_gate_logits = [init_vanilla_ffn(self.max_seq_len, d_model*2) for _ in range(num_heads)] # this does one for each head... overfitting?
-            #self.nm_gate_logits = init_vanilla_ffn(self.max_seq_len, d_model*2) # only one per layer...
-
-        self.rel_position_matrix = None
-        if rel_pos_emb:
-            self.rel_position_matrix = tf.Variable(tf.initializers.GlorotUniform()(shape=(self.max_seq_len, self.max_seq_len)))
+        self.rel_position_matrix_key = None
+        self.rel_position_matrix_value = None
+        if self.rel_pos_emb:
+            # TODO: currently testing all heads having the same relative position embedding...
+            self.rel_position_matrix_key = tf.Variable(tf.initializers.GlorotUniform()(shape=(self.max_seq_len, self.d_model)))
+            self.rel_position_matrix_value = tf.Variable(tf.initializers.GlorotUniform()(shape=(self.max_seq_len, self.d_model)))
 
         self.dense = tf.keras.layers.Dense(d_model)
 
@@ -113,15 +111,22 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
         k = self.wk(k)  # (batch_size, (max_)seq_len, d_model)
         v = self.wv(v)  # (batch_size, (max_)seq_len, d_model)
 
+        if self.rel_pos_emb: # TODO: if adding to each head individually, apply it to k and v below...
+            k = k + self.rel_position_matrix_key
+            v = v + self.rel_position_matrix_value
+
+        if nm_inp_gating is not None: # TODO: consider the same as above/ however not an issue as last dim changed to depth below, which is still distinctly different for each head.
+            if not self.nm_gating:
+                raise Exception(f"nm_inp_gating ({type(nm_inp_gating)}) should be None if nm_gating ({self.nm_gating}) is set to False")
+            q = q * tf.math.sigmoid(nm_inp_gating)
+
         q = self.split_heads(q)  # (batch_size, num_heads, (max_)seq_len, depth)
         k = self.split_heads(k)  # (batch_size, num_heads, (max_)seq_len, depth)
         v = self.split_heads(v)  # (batch_size, num_heads, (max_)seq_len, depth)
 
         scaled_attention, attention_weights = None, None
         if nm_inp_gating is not None:
-            if not self.nm_gating:
-                raise Exception(f"nm_inp_gating ({type(nm_inp_gating)}) should be None if nm_gating ({self.nm_gating}) is set to False")
-            scaled_attention, attention_weights = self.neuromodulation_attention(q, k, v, nm_inp_gating, mask)
+            scaled_attention, attention_weights = self.neuromodulation_attention(q, k, v, None, mask) # note: None here as I have changed the gating to be done in this function (call).
         else:
             scaled_attention, attention_weights = self.scaled_dot_product_attention(q, k, v, mask)
 
@@ -160,9 +165,6 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
         dk = tf.cast(tf.shape(k)[-1], tf.float32) # i.e. get the depth.
         scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
 
-        if self.rel_position_matrix is not None:
-            scaled_attention_logits = scaled_attention_logits + self.rel_position_matrix
-
         # add the mask to the scaled tensor.
         if mask is not None:
             scaled_attention_logits += (mask * -1e9)
@@ -174,7 +176,7 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
 
         return output, attention_weights
 
-    def neuromodulation_attention(self, q, k, v, nm_inp_gating, mask=None):
+    def neuromodulation_attention(self, q, k, v, nm_inp_gating=None, mask=None):
         '''
         Function: neuromodulation_attention
         Description: Performs neuromodulation gated variant of scaled dot-product attention.
@@ -204,41 +206,17 @@ class NMMultiHeadAttention(tf.keras.layers.Layer):
         dk = tf.cast(tf.shape(k)[-1], tf.float32)  # i.e. get the depth.
         scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
 
-        if self.rel_position_matrix is not None:
-            scaled_attention_logits = scaled_attention_logits + self.rel_position_matrix
-
-        gated_attn_logits = None
-        for i in range(self.num_heads):
-            # for each head multiply the head by it's associated dense layer.
-            if isinstance(self.nm_gate_logits, list): z = self.nm_gate_logits[i](nm_inp_gating) # one for each head in current layer.
-            else: z = self.nm_gate_logits(nm_inp_gating) # one for all heads in current layer.
-
-            # expand along dim 1 to match the scaled_attention_logits' num_heads dimension.
-            if gated_attn_logits is None:
-                gated_attn_logits = tf.expand_dims(z, axis=1)
-            else:
-                gated_attn_logits = tf.concat([gated_attn_logits, tf.expand_dims(z, axis=1)], 1)
-
-        # gated_attn_logits.shape == (batch_size, num_heads, max_seq_len, max_seq_len)
-
         # Needed for multiple worker strategy for batch size of 0.
-        if not(scaled_attention_logits.shape[2] is None and scaled_attention_logits.shape[3] is None):
-            assert scaled_attention_logits.shape == gated_attn_logits.shape, f"The dimensions between scaled_attention_logits ({scaled_attention_logits.shape})" \
-                                                                                f"and gated_attn_logits ({gated_attn_logits.shape}) doesn't match"
-
-        gated_attn_logits = tf.math.sigmoid(gated_attn_logits)
-
-        # perform context dependant gating.
-        attention_weights = gated_attn_logits * scaled_attention_logits # (batch_size, num_heads, max_seq_len, max_seq_len)
+        #if not(scaled_attention_logits.shape[2] is None and scaled_attention_logits.shape[3] is None):
+        #    assert scaled_attention_logits.shape == gated_attn_logits.shape, f"The dimensions between scaled_attention_logits ({scaled_attention_logits.shape})" \
+        #                                                                        f"and gated_attn_logits ({gated_attn_logits.shape}) doesn't match"
 
         if mask is not None:
             # mask as per the vanilla scaled dot-product attention.
-            attention_weights += (mask * -1e9)
-            # uncomment below if softmax below is not used.
-            #attention_weights *= tf.cast(tf.math.equal(mask, 0), tf.float32)  # flip 0's and 1's and multiply. Has the same effect for when softmax isn't used.
+            scaled_attention_logits += (mask * -1e9)
 
         # comment/uncomment below if it matches the above masking.
-        attention_weights = tf.nn.softmax(attention_weights, axis=-1)
+        attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)
 
         output = tf.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
 

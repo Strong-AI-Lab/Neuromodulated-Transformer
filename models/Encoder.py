@@ -34,7 +34,7 @@ class EncoderLayer(tf.keras.layers.Layer):
         dropout2: Dropout layer which occurs after the feed-forward layer and before the residual connection
             and layer normalization.
     '''
-    def __init__(self, d_model, num_heads, dff, max_seq_len, rate=0.1, nm_attn=False, nm_eol=False):
+    def __init__(self, d_model, num_heads, dff, max_seq_len, rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True):
         '''
         Function: __init__ \n
         Description: Initializes an encoder layer with the passed parameters. \n
@@ -56,7 +56,7 @@ class EncoderLayer(tf.keras.layers.Layer):
         self.nm_attn = nm_attn
         self.nm_eol = nm_eol
 
-        self.mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=nm_attn)
+        self.mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=nm_attn, rel_pos_emb=rel_pos_emb)
         self.ffn = FeedForwardNetwork(init_vanilla_ffn(d_model, dff))
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)  # for multi-head attention layer.
@@ -65,10 +65,7 @@ class EncoderLayer(tf.keras.layers.Layer):
         self.dropout1 = tf.keras.layers.Dropout(rate)
         self.dropout2 = tf.keras.layers.Dropout(rate)
 
-        if self.nm_eol:
-            self.dense_eol = tf.keras.layers.Dense(d_model, activation='sigmoid')
-
-    def call(self, x, training, mask, nm_inp_gating_attn=None, nm_inp_gating_eol=None):
+    def call(self, x, training, mask):
         '''
         Function: call \n
         Description: Overrides parent class's call function (i.e. one run through EncoderLayer). \n
@@ -84,13 +81,8 @@ class EncoderLayer(tf.keras.layers.Layer):
         '''
         assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
-        if nm_inp_gating_attn is not None:
-            assert self.nm_attn, f"If nm_inp_gating_attn is not None, then nm_attn should be set to True, got {self.nm_attn}!"
-            nm_inp_gating_attn = nm_inp_gating_attn[:,-x.shape[1]:, -x.shape[1]:] # remove global_auxiliary tokens.
-        else: assert not self.nm_attn, f"If nm_inp_gating_attn is None then, nm_attn should be set to False, got {self.nm_attn}"
-
         x_ = self.layernorm1(x)
-        attn1, attn_weights = self.mha(x_, x_, x_, nm_inp_gating=nm_inp_gating_attn, mask=mask)
+        attn1, attn_weights = self.mha(x_, x_, x_, nm_inp_gating=None, mask=mask)
         attn1 = self.dropout1(attn1, training=training)
         out1 = x + attn1
 
@@ -98,11 +90,6 @@ class EncoderLayer(tf.keras.layers.Layer):
         out2 = self.ffn(out1_)
         out2 = self.dropout2(out2, training=training)
         out2 = out1 + out2
-
-        if nm_inp_gating_eol is not None:
-            assert self.nm_eol, f"If nm_inp_gating_eol is not None, then nm_eol should be set to True, got {self.nm_eol}!"
-            nm_inp_gating_eol = self.dense_eol(nm_inp_gating_eol[:,-self.max_seq_len:,:]) #tf.math.sigmoid(nm_inp_gating_eol)
-            out2 = nm_inp_gating_eol * out2
 
         return out2, attn_weights
 

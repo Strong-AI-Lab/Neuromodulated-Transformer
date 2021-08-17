@@ -50,31 +50,19 @@ class SlidingWindowTrain(ParentTrainNL):
 
         #norm = 0.1 # this is hardcoded, consider changing to a passable parameter to the training function.
 
-        lambda_ = 0.5 # aux loss penalty.
-
         nm_mask = create_combined_mask(nm_inp, self.padding_id, num_aux_tokens)
         dec_mask = create_combined_mask(tar_inp, self.padding_id)
 
-        #loss, size = 0, 0
+        loss, size = 0, 0
         with tf.GradientTape() as tape:
-            predictions, _, _, aux_pred_list = self.model(tar_inp, nm_inp, training=True, padding_id=self.padding_id,
-                                               num_aux_tok=num_aux_tokens, nm_mask=nm_mask, dec_mask=dec_mask) # ret (output, attention weights, nm_output)
+            predictions, _, _ = self.model(tar_inp, nm_inp, training=True, nm_mask=nm_mask, dec_mask=dec_mask) # ret (output, attention weights, nm_output)
             loss, size = self.loss_function(tar_real, predictions, self.loss_object, self.padding_id,
                                             self.window_size_train, isStart, domask2=False)
-            aux_losses = []
-            for pred in aux_pred_list:
-                l, s = self.loss_function(tar_real, pred, self.loss_object, self.padding_id,
-                                   self.window_size_train, isStart, domask2=False)
-                aux_losses.append(l/s)
 
             loss_ = loss/size
-            aux_loss_ = loss_
-            for aloss in aux_losses:
-                aux_loss_ += aloss * lambda_ # penalty to the auxiliary loss
 
-        # TODO: check that below trains like I think it does, i.e. the auxiliary losses update as they should...
-        gradients = tape.gradient(aux_loss_, self.model.trainable_variables)
-        #print(f"Gradients... {gradients}")
+        gradients = tape.gradient(loss_, self.model.trainable_variables)
+
         #gradients = [tf.clip_by_norm(g, norm)
         #         for g in gradients]
 
@@ -136,13 +124,13 @@ class SlidingWindowTrain(ParentTrainNL):
                 batch += 1
 
                 # every n iterations run through
-                if iteration_counter % 2500 == 0:
+                if iteration_counter % 1000 == 0:
                     if "val" in data_dict.keys():
                         print(f"Running through the validation set now!")
                         self._run_validation(e, save_filepath_val, data_dict["val"],
                                              num_aux_tokens, iteration_counter)
 
-                if (iteration_counter) % 2500 == 0:
+                if (iteration_counter) % 2000 == 0:
                     ckpt_save_path = self.ckpt_manager.save()
                     print(f'Saving checkpoint for iteration {iteration_counter} at {ckpt_save_path}')
 
@@ -197,9 +185,11 @@ class SlidingWindowTrain(ParentTrainNL):
 
     def val_step(self, tar_inp, tar_real, nm_inp, num_aux_tokens, isStart):
 
+        nm_mask = create_combined_mask(nm_inp, self.padding_id, num_aux_tokens)
+        dec_mask = create_combined_mask(tar_inp, self.padding_id)
+
         loss, size = 0, 0
-        predictions, _, _, _ = self.model(tar_inp, nm_inp, training=False, padding_id=self.padding_id,
-                                       num_aux_tok=num_aux_tokens)  # ret (output, attention weights)
+        predictions, _, _ = self.model(tar_inp, nm_inp, training=False, nm_mask=nm_mask, dec_mask=dec_mask)  # ret (output, attention weights)
         loss, size = self.loss_function(tar_real, predictions, self.loss_object, self.padding_id,
                                         self.window_size_val, isStart, domask2=True)
 

@@ -49,7 +49,6 @@ if __name__ == "__main__":
 
     target_vocab_size, nm_vocab_size = config.tokenizer.get_vocab_size_dec(), config.tokenizer.get_vocab_size_dec()
 
-    parallel_layers = config.parallel_layers
     nm_attn = config.nm_attn
     nm_eol = config.nm_eol
 
@@ -67,28 +66,30 @@ if __name__ == "__main__":
     transformer = None
     optimizer = None
 
+    '''
+    num_layers_dec, num_layers_nm, num_layers_gating, d_model, num_heads, dff, max_seq_len_dec, max_seq_len_nm,
+                 target_vocab_size, nm_vocab_size, max_position_encoding_dec=10000, max_position_encoding_nm=10000,
+                 rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True
+    '''
+
     if strategy is not None:
         with strategy.scope():
-            transformer = NMTransformer(config.num_layers_dec, config.num_layers_nm, config.d_model,
-                                        config.num_heads, config.dff, max_seq_len_dec,
+            transformer = NMTransformer(config.num_layers_dec, config.num_layers_nm, config.num_layers_gating,
+                                        config.d_model, config.num_heads, config.dff, max_seq_len_dec,
                                         max_seq_len_nm, target_vocab_size, nm_vocab_size,
                                         max_position_encoding_dec=max_position_encoding_dec,
                                         max_position_encoding_nm=max_position_encoding_nm,
                                         rate=config.rate, nm_attn=nm_attn, nm_eol=nm_eol,
-                                        parallel_layers=parallel_layers, rel_pos_emb=rel_pos_emb,
-                                        num_aux_losses=config.num_aux_losses,
-                                        stop_grad_gating=config.stop_grad_gating)
+                                        rel_pos_emb=rel_pos_emb)
             optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.999)
     else:
-        transformer = NMTransformer(config.num_layers_dec, config.num_layers_nm, config.d_model,
-                                    config.num_heads, config.dff, max_seq_len_dec,
+        transformer = NMTransformer(config.num_layers_dec, config.num_layers_nm, config.num_layers_gating,
+                                    config.d_model, config.num_heads, config.dff, max_seq_len_dec,
                                     max_seq_len_nm, target_vocab_size, nm_vocab_size,
                                     max_position_encoding_dec=max_position_encoding_dec,
                                     max_position_encoding_nm=max_position_encoding_nm,
                                     rate=config.rate, nm_attn=nm_attn, nm_eol=nm_eol,
-                                    parallel_layers=parallel_layers, rel_pos_emb=rel_pos_emb,
-                                    num_aux_losses=config.num_aux_losses,
-                                    stop_grad_gating=config.stop_grad_gating)
+                                    rel_pos_emb=rel_pos_emb)
         optimizer = tf.keras.optimizers.Adam(learning_rate, beta_1=0.9, beta_2=0.999)
 
     data_dict = {}
@@ -113,14 +114,14 @@ if __name__ == "__main__":
         data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
 
     train_class = SlidingWindowTrain(transformer, optimizer, config.loss_object, loss_function_window_size, config.tokenizer,
-                                     checkpoint_path_recent="../../checkpoints/TestModel_updated/",
+                                     checkpoint_path_recent="../../checkpoints/v3_test/",
                                      checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
                                      recent_to_keep=50, load_recent=False, best_to_keep=5, load_best=False,
                                      window_size_train=max_seq_len_dec, window_size_val=max_seq_len_dec)
 
-    train_class.train_iteration(epoch_start=0, epoch_end=5,
-                                save_filepath_train="../../results/TestModel_updated/",
-                                save_filepath_val="../../results/TestModel_updated/",
+    train_class.train_iteration(epoch_start=0, epoch_end=2,
+                                save_filepath_train="../../results/v3_test/",
+                                save_filepath_val="../../results/v3_test/",
                                 data_dict=data_dict, num_aux_tokens=0)
 
 
