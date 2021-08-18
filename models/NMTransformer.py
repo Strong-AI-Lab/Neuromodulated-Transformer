@@ -33,7 +33,7 @@ class NMTransformer(tf.keras.Model):
 
     def __init__(self, num_layers_dec, num_layers_nm, num_layers_gating, d_model, num_heads, dff, max_seq_len_dec, max_seq_len_nm,
                  target_vocab_size, nm_vocab_size, max_position_encoding_dec=10000, max_position_encoding_nm=10000,
-                 rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True):
+                 rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True): # TODO: remove max_seq_len_dec and max_seq_len_nm
         '''
         Function: __init__ \n
         Description: Initializes the Neuromodulated Transformer (decoder version) with the passed parameters. \n

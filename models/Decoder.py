@@ -100,7 +100,7 @@ class DecoderLayer(tf.keras.layers.Layer):
             attn_weights_block1: (tf.Tensor; [batch_size, num_heads, (max_)seq_len, (max_)seq_len])
             attn_weights_block2: (tf.Tensor; [batch_size, num_heads, (max_)seq_len(_q), (max_)seq_len(_k)])
         '''
-        assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
+        assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!" # TODO remove.
 
         if nm_encoder_input is not None:
             if not(self.nm_eol or self.nm_attn): raise Exception(f"One of nm_eol ({self.nm_eol}) or nm_attn ({self.nm_attn}) should be True")

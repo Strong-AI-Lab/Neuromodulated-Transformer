@@ -1,7 +1,8 @@
 import os
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "3,4,5,6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6"
+GPUS_AVAILABLE = 3
 
 import sys
 
@@ -41,7 +42,7 @@ def get_generator(tokenizer, filepath="/large_data/wikitext-103/wiki.valid.token
 
 if __name__ == "__main__":
 
-    config = TestModel(strategy="MirroredStrategy", batch_size=8*4, rate=0.1) #TODO add pad token... and others
+    config = TestModel(strategy="MirroredStrategy", batch_size=8*GPUS_AVAILABLE, rate=0.1) #TODO add pad token... and others
 
     strategy = config.strategy
     # strategy = None
@@ -116,12 +117,13 @@ if __name__ == "__main__":
     train_class = SlidingWindowTrain(transformer, optimizer, config.loss_object, loss_function_window_size, config.tokenizer,
                                      checkpoint_path_recent="../../checkpoints/v3_test/",
                                      checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
-                                     recent_to_keep=50, load_recent=False, best_to_keep=5, load_best=False,
-                                     window_size_train=max_seq_len_dec, window_size_val=max_seq_len_dec)
+                                     recent_to_keep=50, load_recent=True, best_to_keep=5, load_best=False,
+                                     window_size_train=max_seq_len_dec, window_size_val=max_seq_len_dec,
+                                     load_specific_path="")
 
-    train_class.train_iteration(epoch_start=0, epoch_end=2,
+    train_class.train_iteration(epoch_start=5, epoch_end=7, iteration_counter=20460, # TODO change iteration counter
                                 save_filepath_train="../../results/v3_test/",
                                 save_filepath_val="../../results/v3_test/",
-                                data_dict=data_dict, num_aux_tokens=0)
+                                data_dict=data_dict, num_aux_tokens=config.num_aux_tokens, save_end_epoch=True)
 
 

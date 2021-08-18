@@ -52,7 +52,7 @@ class EncoderLayer(tf.keras.layers.Layer):
         '''
         super(EncoderLayer, self).__init__()
 
-        self.max_seq_len = max_seq_len
+        self.max_seq_len = max_seq_len # TODO remove max_seq_len
         self.nm_attn = nm_attn
         self.nm_eol = nm_eol
 

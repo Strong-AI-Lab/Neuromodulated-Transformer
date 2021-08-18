@@ -88,8 +88,9 @@ class SlidingWindowTrain(ParentTrainNL):
 
         return loss, size
 
-    def train_iteration(self, epoch_start, epoch_end, save_filepath_train, save_filepath_val, data_dict, num_aux_tokens):
-        iteration_counter = 0
+    def train_iteration(self, epoch_start, epoch_end, iteration_counter, save_filepath_train, save_filepath_val,
+                        data_dict, num_aux_tokens, save_end_epoch=True):
+        iteration_counter = iteration_counter
         for e in range(epoch_start, epoch_end):
             start = time.time()
 
@@ -119,7 +120,7 @@ class SlidingWindowTrain(ParentTrainNL):
                     bpc = dict_["bpc"]
 
                 if iteration_counter % 100 == 0:
-                    print(f'Iteration {iteration_counter} Epoch {e+1} Batch {batch} Loss {loss_:.4f}'
+                    print(f'Iteration {iteration_counter} Epoch {e+1} Batch {batch+1} Loss {loss_:.4f}'
                           f' Perplexity {perp:.4f} Bits Per Word (bpw) {bpc:.4f}')
                 batch += 1
 
@@ -143,8 +144,7 @@ class SlidingWindowTrain(ParentTrainNL):
                 epoch_perp = dict__["perplexity"]
             if "bpc" in dict_.keys():
                 epoch_bpc = dict__["bpc"]
-            print(
-                f'Epoch {e + 1} Loss {total_loss:.4f} Perplexity {epoch_perp:.4f} Bits Per Word (bpw) {epoch_bpc:.4f}')
+            print(f'Epoch {e + 1} Loss {total_loss:.4f} Perplexity {epoch_perp:.4f} Bits Per Word (bpw) {epoch_bpc:.4f}')
             print(f'Time taken for epoch {e + 1}: {time.time() - start:.2f} secs\n')
 
             header = True if e == 0 else False
@@ -153,6 +153,9 @@ class SlidingWindowTrain(ParentTrainNL):
             if "val" in data_dict.keys():
                 print(f"Running through the validation set now!")
                 self._run_validation(e, save_filepath_val, data_dict["val"], num_aux_tokens)  # note e+1 is not correct.
+            if save_end_epoch:
+                ckpt_save_path = self.ckpt_manager.save()
+                print(f'Saving checkpoint for epoch {e+1} at {ckpt_save_path}')
 
     def _run_validation(self, e, save_filepath, validation, num_aux_tokens, iteration_counter=None):
         start = time.time()
