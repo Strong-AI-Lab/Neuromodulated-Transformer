@@ -2,7 +2,7 @@
 File name: Encoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 29/07/21
+Data last modified: 18/08/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -52,9 +52,11 @@ class EncoderLayer(tf.keras.layers.Layer):
         '''
         super(EncoderLayer, self).__init__()
 
-        self.max_seq_len = max_seq_len # TODO remove max_seq_len
+        self.max_seq_len = max_seq_len
         self.nm_attn = nm_attn
         self.nm_eol = nm_eol
+
+        self.rel_pos_emb = rel_pos_emb
 
         self.mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=nm_attn, rel_pos_emb=rel_pos_emb)
         self.ffn = FeedForwardNetwork(init_vanilla_ffn(d_model, dff))
@@ -79,7 +81,8 @@ class EncoderLayer(tf.keras.layers.Layer):
             out2: (tf.Tensor; [batch_size, max_seq_len, d_model])
             attn_weights: (tf.Tensor; [batch_size, num_heads, (max_)seq_len, (max_)seq_len])
         '''
-        assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
+        if self.rel_pos_emb:
+            assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
         x_ = self.layernorm1(x)
         attn1, attn_weights = self.mha(x_, x_, x_, nm_inp_gating=None, mask=mask)
@@ -177,7 +180,6 @@ class Encoder(tf.keras.layers.Layer):
             # in practice for a dim of 512, 22.63 is what x is multiplied by.
             x *= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
             x += self.pos_encoding[:, :seq_len, :]
-            # TODO: consider if normalization needs to occur here?
             x /= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
             x = self.dropout(x, training=training)
 

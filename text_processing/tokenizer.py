@@ -65,42 +65,61 @@ class Tokenizer(object):
     def encode_single(self, input):
         assert isinstance(input, str), f"The input ({input}) is not of type string, got {type(input)}!"
         return self.tokenizer.encode(input, add_special_tokens=False, pad_to_max_length=False) # this will be a list.
+    # encode_single [73491]
 
     def encode_single_plus(self, input):
         assert isinstance(input, str), f"The input ({input}) is not of type string, got {type(input)}!"
-        return self.tokenizer.encode_plus(input,
-                                       add_special_tokens=False,
-                                       pad_to_max_length=False,
-                                       return_token_type_ids=True,
-                                       return_attention_mask=True) # this will be a dictionary.
+        #return self.tokenizer.encode_plus(input,
+        #                               add_special_tokens=False,
+        #                               pad_to_max_length=False,
+        #                               return_token_type_ids=True,
+        #                               return_attention_mask=False) # this will be a dictionary.
+        print(f"Currently not implemented")
+        return None
 
     def batch_encode_plus(self, input):
         assert isinstance(input, list), f"The input ({input}) is not of type list, got {type(input)}!"
-        return self.tokenizer.batch_encode_plus(input,
-                                       add_special_tokens=False,
-                                       pad_to_max_length=False,
-                                       return_token_type_ids=True,
-                                       return_attention_mask=True) # this will be a dictionary.
+        #return self.tokenizer.batch_encode_plus(input,
+        #                               add_special_tokens=False,
+        #                               pad_to_max_length=False,
+        #                               return_token_type_ids=True,
+        #                               return_attention_mask=False) # this will be a dictionary.
+        print(f"Currently not implemented")
+        return None
 
     def batch_encode(self, input):
         assert isinstance(input, list), f"The input ({input}) is not of type list, got {type(input)}!"
         return self.tokenizer.batch_encode_plus(input,
                                        add_special_tokens=False,
                                        pad_to_max_length=False) # this will be a dictionary.
+    # sample output: {'input_ids': [[73491], [24]]}
 
     def encode_single_id_string(self, input):
         assert isinstance(input, str), f"The input ({input}) is not of type string, got {type(input)}!"
-        out1 = self.tokenizer.encode_plus(input,
+        out1 = self.tokenizer.encode(input,
                                        add_special_tokens=False,
                                        pad_to_max_length=False,
                                        return_token_type_ids=False,
                                        return_attention_mask=False)
         out2 = self.tokenizer.tokenize(input) # this is for the reading stratetgies later, need the original word when it is unknown.
         return (out1, out2)
+    # encode_single_id_string ([1, 24, 37, 1, 273, 129, 7, 1, 24, 509], ['the', 'lakers', 'are', 'the', 'best', 'team', 'in', 'the', 'nba', '!'])
+
+    def encode_single_id_string_max_seq_len(self, input, max_seq_len):
+        assert isinstance(input, str), f"The input ({input}) is not of type string, got {type(input)}!"
+        out1 = self.tokenizer.encode(input,
+                                       add_special_tokens=False,
+                                       pad_to_max_length=False,
+                                       return_token_type_ids=False,
+                                       return_attention_mask=False,
+                                       max_length=max_seq_len)
+        out2 = self.tokenizer.tokenize(input) # this is for the reading stratetgies later, need the original word when it is unknown.
+        return (out1, out2)
 
     def encode_single_string_only(self, input):
         assert isinstance(input, str), f"The input ({input}) is not of type string, got {type(input)}!"
         return self.tokenizer.tokenize(input) # this is for the reading stratetgies later, need the original word when it is unknown.
+    # encode_single_string_only ['the', 'lakers', 'are', 'the', 'best', 'team', 'in', 'the', 'nba', '!']
 
     #TODO add in decoding methods.
     def batch_decode(self, input):
@@ -134,5 +153,19 @@ if __name__ == "__main__":
     print(tokenizer.get_vocab_size_dec())
     print(tokenizer.get_vocab_size())
     #print(tokenizer.batch_encode_plus("The lakers have 17 NBA championships!!!!"))
+
+    print("encode_single", tokenizer.encode_single("hello"))
+    #print("encode_single_plus", tokenizer.encode_single_plus("hello"))
+    print("batch_encode", tokenizer.batch_encode(["hello", "marley"]))
+    #print("batch_encode_plus", tokenizer.batch_encode_plus(["hello", "marley"]))
+    print("encode_single_id_string", tokenizer.encode_single_id_string("the lakers are the best team in the nba!"))
+    print("encode_single_id_string", tokenizer.encode_single_id_string("the lakers are the best team in the nba!"))
+    print("encode_single_string_only", tokenizer.encode_single_string_only("the lakers are the best team in the nba!"))
+
+    x = tokenizer.encode_single("hellofkdsjfklsd")
+    print(f"unknown token: {tokenizer.decode(x)}") # <unk>
+
+
+
 
 

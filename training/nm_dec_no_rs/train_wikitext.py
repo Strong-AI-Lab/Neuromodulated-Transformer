@@ -1,7 +1,7 @@
 import os
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,3,4"
 GPUS_AVAILABLE = 3
 
 import sys
@@ -27,7 +27,7 @@ from models.NMTransformer import NMTransformer
 from text_processing.tokenizer import Tokenizer
 from transformers import TransfoXLTokenizer
 from load_datasets.language_modelling.load_wikitext import *
-from models.Model_Hyperparameters.model_hyperparameters import TestModel
+from models.Model_Hyperparameters.model_hyperparameters import *
 
 
 def get_generator(tokenizer, filepath="/large_data/wikitext-103/wiki.valid.tokens", load_strategy="default", load_data=[False, ""],
@@ -42,7 +42,7 @@ def get_generator(tokenizer, filepath="/large_data/wikitext-103/wiki.valid.token
 
 if __name__ == "__main__":
 
-    config = TestModel(strategy="MirroredStrategy", batch_size=8*GPUS_AVAILABLE, rate=0.1) #TODO add pad token... and others
+    config = WikitextBigAbsPosEmb(strategy="MirroredStrategy", batch_size=2*GPUS_AVAILABLE, rate=0.1)
 
     strategy = config.strategy
     # strategy = None
@@ -110,20 +110,31 @@ if __name__ == "__main__":
                                      process_strategy=process_strategy,
                                      window_size=max_seq_len_dec, shuffle=False,
                                      max_seq_len=max_seq_len_dec,
-                                     tokenizer = config.tokenizer)
+                                     tokenizer=config.tokenizer)
     if strategy is not None:
         data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
 
     train_class = SlidingWindowTrain(transformer, optimizer, config.loss_object, loss_function_window_size, config.tokenizer,
-                                     checkpoint_path_recent="../../checkpoints/v3_test/",
+                                     checkpoint_path_recent="../../checkpoints/Wikitext_abs_emb_bigmodel/",
                                      checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
-                                     recent_to_keep=50, load_recent=True, best_to_keep=5, load_best=False,
+                                     recent_to_keep=10, load_recent=False, best_to_keep=5, load_best=False,
                                      window_size_train=max_seq_len_dec, window_size_val=max_seq_len_dec,
-                                     load_specific_path="")
+                                     load_specific_path="/data/kkno604/Neuromodulated-Transformer/checkpoints/Wikitext_abs_emb_bigmodel/ckpt-53")
 
-    train_class.train_iteration(epoch_start=5, epoch_end=7, iteration_counter=20460, # TODO change iteration counter
-                                save_filepath_train="../../results/v3_test/",
-                                save_filepath_val="../../results/v3_test/",
+    # comment below in or out if needed here.
+    optimizer = None
+    if strategy is not None:
+        with strategy.scope():
+            lr = tf.keras.optimizers.schedules.CosineDecay(0.000055, decay_steps=1000000)
+            optimizer = tf.keras.optimizers.Adam(lr, beta_1=0.9, beta_2=0.999) # try a fixed initial learning rate.
+    train_class.optimizer = optimizer
+    train_class.checkpoint_path_recent = "../../checkpoints/Wikitext_abs_emb_bigmodel_reset_learning_rate/"
+    train_class.create_recent_checkpoint(keep=10) # switches the optimizer with already loaded model with different optimizer.
+
+
+    train_class.train_iteration(epoch_start=8, epoch_end=9, iteration_counter=132987,
+                                save_filepath_train="../../results/Wikitext_abs_emb_bigmodel_reset_learning_rate/",
+                                save_filepath_val="../../results/Wikitext_abs_emb_bigmodel_reset_learning_rate/",
                                 data_dict=data_dict, num_aux_tokens=config.num_aux_tokens, save_end_epoch=True)
 
 

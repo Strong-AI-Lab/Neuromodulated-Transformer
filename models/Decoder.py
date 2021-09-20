@@ -2,7 +2,7 @@
 File name: Decoder.py
 Author: Kobe Knowles
 Date created: 05/07/21
-Data last modified: 12/08/21
+Data last modified: 27/08/21
 Python Version: 3.6
 Tensorflow version: 2
 '''
@@ -62,12 +62,14 @@ class DecoderLayer(tf.keras.layers.Layer):
         self.nm_attn = nm_attn
         self.nm_eol = nm_eol
 
+        self.rel_pos_emb = rel_pos_emb
+
         # d_model, num_heads, max_seq_len, nm_gating=False
-        self.mha1 = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=nm_attn)
+        self.mha1 = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=nm_attn, rel_pos_emb=rel_pos_emb)
 
         self.ffn = FeedForwardNetwork(init_vanilla_ffn(d_model, dff))
 
-        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6) # TODO: check what epsilon actually does.
+        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
         self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
         #self.layernorm3 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
 
@@ -100,7 +102,8 @@ class DecoderLayer(tf.keras.layers.Layer):
             attn_weights_block1: (tf.Tensor; [batch_size, num_heads, (max_)seq_len, (max_)seq_len])
             attn_weights_block2: (tf.Tensor; [batch_size, num_heads, (max_)seq_len(_q), (max_)seq_len(_k)])
         '''
-        assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!" # TODO remove.
+        if self.rel_pos_emb:
+            assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
         if nm_encoder_input is not None:
             if not(self.nm_eol or self.nm_attn): raise Exception(f"One of nm_eol ({self.nm_eol}) or nm_attn ({self.nm_attn}) should be True")
@@ -160,7 +163,7 @@ class Decoder(tf.keras.layers.Layer):
     '''
 
     def __init__(self, num_layers, num_layers_gating, d_model, num_heads, dff, max_seq_len, target_vocab_size, max_position_encoding=10000,
-                 rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True):
+                 rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True, max_no_ans=9):
         '''
         Function: __init__ \n
         Description: Initialization of the decoder class. \n
@@ -191,6 +194,7 @@ class Decoder(tf.keras.layers.Layer):
         self.d_model = d_model
         self.max_seq_len = max_seq_len
         self.rel_pos_emb = rel_pos_emb
+        self.max_no_ans = max_no_ans # multiple choice QA. this many actual options at maximum.
 
         # possible values are ["n_layers", "one"]
         self.mode = "n_layers"
@@ -198,6 +202,10 @@ class Decoder(tf.keras.layers.Layer):
 
         self.embedding = tf.keras.layers.Embedding(target_vocab_size, d_model)
         self.pos_encoding = positional_encoding(max_position_encoding, d_model)
+
+        self.W_1 = tf.keras.layers.Dense(self.d_model, input_shape=(self.max_seq_len, self.d_model)) # note: here and below a bias is used when in the original model it wasn't
+        self.W_2 = tf.keras.layers.Dense(self.d_model, input_shape=(self.max_seq_len, (self.max_no_ans-1)*self.d_model))
+        self.W_3 = tf.keras.layers.Dense(self.d_model, input_shape=(self.max_seq_len, self.d_model*2))
 
         self.decoder_layers = [DecoderLayer(d_model, num_heads, num_layers_gating, dff, max_seq_len,
                                             rate, nm_attn, nm_eol,
@@ -222,8 +230,9 @@ class Decoder(tf.keras.layers.Layer):
             x: (tf.Tensor; [batch_size, max_seq_len, d_model]) \n
             attention_weights: (dict; tf.Tensor; [batch_size, num_heads, max_seq_len, max_seq_len (can vary for encoder input)])
         '''
-        assert x.shape[1] == self.max_seq_len, f"The tensor x should have a dimension 1 (python indices) size of {self.max_seq_len}." \
-                                           f"Got {x.shape[1]} instead!"
+        if self.rel_pos_emb:
+            assert x.shape[1] == self.max_seq_len, f"The tensor x should have a dimension 1 (python indices) size of {self.max_seq_len}." \
+                                                   f"Got {x.shape[1]} instead!"
 
         seq_len = x.shape[1]
 

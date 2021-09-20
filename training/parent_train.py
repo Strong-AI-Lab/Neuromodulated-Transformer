@@ -59,7 +59,7 @@ class ParentTrainNL:
             raise Exception("The padding token should only have one id! (it hasn't been added to the vocabulary)")
 
         # the recent checkpoints are required.
-        self._create_recent_checkpoint(recent_to_keep)
+        self.create_recent_checkpoint(recent_to_keep)
         if load_recent: self._load_recent_checkpoint()
         if load_specific_path != "":
             if load_recent: print(f"Note: load_recent command has been overridden.")
@@ -69,7 +69,7 @@ class ParentTrainNL:
         #if self.checkpoint_path_best != "": self._create_best_checkpoint(best_to_keep)
         #if load_best: self._load_best_checkpoint()
 
-    def _create_recent_checkpoint(self, keep):
+    def create_recent_checkpoint(self, keep):
         self.ckpt = tf.train.Checkpoint(model=self.model,
                                         optimizer=self.optimizer)
         self.ckpt_manager = tf.train.CheckpointManager(self.ckpt, self.checkpoint_path_recent, max_to_keep=keep)  # maybe remove max_to_keep?
@@ -351,6 +351,8 @@ class ParentTrainNL:
         with open(file, "a") as f:
             if header: f.write("Iteration Loss Perplexity BPC \n")
             f.write(f"{iteration} {total_loss} {epoch_perp} {epoch_bpc} \n")
+
+
 
     def run_no_train(self, data):
         '''

@@ -33,7 +33,7 @@ class NMTransformer(tf.keras.Model):
 
     def __init__(self, num_layers_dec, num_layers_nm, num_layers_gating, d_model, num_heads, dff, max_seq_len_dec, max_seq_len_nm,
                  target_vocab_size, nm_vocab_size, max_position_encoding_dec=10000, max_position_encoding_nm=10000,
-                 rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True): # TODO: remove max_seq_len_dec and max_seq_len_nm
+                 rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True, parallel_layers={}):
         '''
         Function: __init__ \n
         Description: Initializes the Neuromodulated Transformer (decoder version) with the passed parameters. \n
@@ -46,11 +46,29 @@ class NMTransformer(tf.keras.Model):
         self.nm_attn = nm_attn
         self.nm_eol = nm_eol
 
+        self.parallel_keys = list()
+        for key in parallel_layers.keys():
+            self.parallel_keys.append(str(key))
+
+        self.metacognition_aux_loss_layers = dict()
+        for key in parallel_layers.keys():
+            if key == "unknown_rs":
+                self.metacognition_aux_loss_layers[key] = tf.keras.Sequential([
+                    tf.keras.layers.Dense(self.d_model, activation='relu', input_shape=(max_seq_len_dec, self.d_model)),
+                    tf.keras.layers.Dense(1, activation='sigmoid', input_shape=(max_seq_len_dec, self.d_model))
+                ]) # purpose is for an auxiliary loss performed with these layers - custom loss that measures difference in
+                   # the loss of running both version (with and without reading strategy).
+            else:
+                self.metacognition_aux_loss_layers[key] = tf.keras.Sequential([
+                    tf.keras.layers.Dense(self.d_model, activation='relu', input_shape=(1, self.d_model)),
+                    tf.keras.layers.Dense(1, activation='sigmoid', input_shape=(1, self.d_model))
+                ])
+
         self.decoder = Decoder(num_layers_dec, num_layers_gating, d_model, num_heads, dff, max_seq_len_dec, target_vocab_size,
                                max_position_encoding_dec, rate, nm_attn, nm_eol, rel_pos_emb=rel_pos_emb)
 
         self.nm_encoder = NMEncoder(num_layers_nm, d_model, num_heads, dff, max_seq_len_nm, nm_vocab_size,
-                                    max_position_encoding_nm, rate, rel_pos_emb=rel_pos_emb)
+                                    max_position_encoding_nm, rate, rel_pos_emb=rel_pos_emb, parallel_layers=parallel_layers)
 
         self.final_layer = tf.keras.layers.Dense(target_vocab_size)
 
@@ -69,18 +87,39 @@ class NMTransformer(tf.keras.Model):
             attn_weights:
             output_dict:
         '''
-        nm_encoder_input, attn_weights_nm_enc = self._run_nm_encoder(nm_inp, training, nm_mask) # (output, attn_weights, aux_pred) for each key.
+
+        #TODO: take dec_inp and nm_inp and combine into one input... and modify the helper train class to account for this?
+        #TODO: NO!!! keep it the same, this will be done in the DataLoader (if pytorch...) Data class that handles the input.
+        #TODO: Possibly need to modify the loss function in the helper class depending on the task.
+
+        if self.nm_eol or self.nm_attn or len(self.parallel_keys.keys()) > 0:
+            nm_encoder_input, attn_weights_nm_enc, x_dict = self._run_nm_encoder(nm_inp, training, nm_mask,
+                                                                                 #restrictions=[])
+                                                                                 restrictions=self.parallel_keys) # (output, attn_weights, aux_pred) for each key.
+        else: nm_encoder_input, attn_weights_nm_enc, x_dict = None, None, None
+        # Don't run nm_encoder if both are set to False and there are no parallel_layers.
+        # x_dict[key] = (out, attn_weights, aux_pred) aux_pred will not be used, keep as none for support for other alternatives.
         dec_output, attn_weights_dec = self._run_decoder(dec_inp, training, nm_encoder_input, dec_mask)
 
         final_output = self.final_layer(dec_output) # (batch_size, seq_len, vocab_size)
 
         final_output = tf.nn.softmax(final_output, axis=-1)
 
-        return final_output, attn_weights_dec, attn_weights_nm_enc
+        x_dict_output, x_dict_output_weights = dict(), dict() # these will be dictionaries?.
+        #TODO add logic for x_dict... it is going to be for metacognition... so need to run in a way without reading strategies to see
+        #TODO performance increase... + additional layers on top to allow back propagation back through the network.
+        #TODO the logic doesn't need to be done as long as the parameters are initialized...
+        #TODO this may need to be moved or integrated with above code later...
+        #for key in x_dict.keys():
+        #    pass
+
+        # x_dict_output will hold the output predictions after a softmax is applied...
+
+        return final_output, attn_weights_dec, attn_weights_nm_enc, x_dict_output, x_dict_output_weights
 
 
     # helper function for the call method. Refer to the call function docstring for description of parameters.
-    def _run_nm_encoder(self, nm_inp, training, mask):
+    def _run_nm_encoder(self, nm_inp, training, mask, restrictions):
         self.nm_encoder.mode = "n_layers"
         return self.nm_encoder(nm_inp, training, mask) # this returns a dictionary of the returned values.
 

@@ -49,6 +49,7 @@ class NMEncoderLayer(tf.keras.layers.Layer):
         super(NMEncoderLayer, self).__init__()
 
         self.max_seq_len = max_seq_len
+        self.rel_pos_emb = rel_pos_emb
 
         self.mha = NMMultiHeadAttention(d_model, num_heads, max_seq_len, nm_gating=False, rel_pos_emb=rel_pos_emb)
         self.ffn = FeedForwardNetwork(init_vanilla_ffn(d_model, dff))
@@ -71,7 +72,8 @@ class NMEncoderLayer(tf.keras.layers.Layer):
             out2: (tf.Tensor; [batch_size, max_seq_len, d_model])
             attn_weights: (tf.Tensor; [batch_size, num_heads, (max_)seq_len, (max_)seq_len])
         '''
-        assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
+        if self.rel_pos_emb:
+            assert self.max_seq_len == x.shape[1], f"x.shape[1] should equal {self.max_seq_len}, got {x.shape[1]}!"
 
         x_ = self.layernorm1(x)
         attn1, attn_weights = self.mha(x_, x_, x_, nm_inp_gating=None, mask=mask)
@@ -103,7 +105,7 @@ class NMEncoder(tf.keras.layers.Layer):
             has been applied.
     '''
     def __init__(self, num_layers, d_model, num_heads, dff, max_seq_len, input_vocab_size, max_position_encoding=10000,
-                 rate=0.1, rel_pos_emb=True):
+                 rate=0.1, rel_pos_emb=True, parallel_layers={}):
         '''
         Function: __init__ \n
         Description: Initialization of the encoder class. \n
@@ -147,6 +149,38 @@ class NMEncoder(tf.keras.layers.Layer):
 
         self.dropout = tf.keras.layers.Dropout(rate)
 
+        self.parallel_layers = {}
+
+        for key, layer in parallel_layers.items():  # modify layer to be a list of size 2. [layer name (str), The number of layers (int)]
+            if layer[0] == "EncoderLayer":
+                self.parallel_layers[key] = [[NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1])]]
+                # below corresponds to the generation of output predictions used as an auxiliary loss.
+                self.parallel_layers[key].append(tf.keras.layers.Dense(self.d_model) if layer[2] else None)
+            elif layer[0] == "NMEncoderLayerNoRC":
+                self.parallel_layers[key] = [
+                    [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1] - 1)] + \
+                    [NMEncoderLayerNoRC(d_model, num_heads, dff, max_seq_len, rate)]]
+                # below corresponds to the generation of output predictions used as an auxiliary loss.
+                self.parallel_layers[key].append(tf.keras.layers.Dense(self.d_model) if layer[2] else None)
+            elif layer[0] == "GateLayerAttn":
+                self.parallel_layers[key] = [
+                    [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1] - 1)] + \
+                    [GateLayerAttn(d_model, num_heads, dff, max_seq_len, rate)]]
+                # below corresponds to the generation of output predictions used as an auxiliary loss.
+                self.parallel_layers[key].append(tf.keras.layers.Dense(self.d_model) if layer[2] else None)
+            elif layer[0] == "MetacognitionSequenceLayer":
+                self.parallel_layers[key] = [
+                    [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1] - 1)] + \
+                    [MetacognitionSequenceLayer(d_model, num_heads, dff, max_seq_len, rate)]]
+                # below corresponds to the generation of output predictions used as an auxiliary loss.
+                self.parallel_layers[key].append(tf.keras.layers.Dense(self.d_model) if layer[2] else None)
+            elif layer[0] == "MetacognitionSingleLayer":
+                self.parallel_layers[key] = [
+                    [NMEncoderLayer(d_model, num_heads, dff, max_seq_len, rate) for _ in range(layer[1] - 1)] + \
+                    [MetacognitionSingleLayer(d_model, num_heads, dff, max_seq_len, rate)]]
+                # below corresponds to the generation of output predictions used as an auxiliary loss.
+                self.parallel_layers[key].append(tf.keras.layers.Dense(self.d_model) if layer[2] else None)
+
     def call(self, x, training, mask, restrictions=[]):
         '''
         Function: call \n
@@ -160,16 +194,16 @@ class NMEncoder(tf.keras.layers.Layer):
             x_dict: (dict; tuple; tf.Tensor; [batch_size, varies, varies] (output from a layer) | tf.Tensor;
                 [batch_size, num_heads, max_seq_len, max_seq_len] (attention weights for that layer) or dict of tensors of this shape) \n
         '''
-        assert x.shape[1] == self.max_seq_len, f"The tensor x should have a dimension 1 (python indices) size of {self.max_seq_len}." \
-                                           f"Got {x.shape[1]} instead!"
-        seq_len = x.shape[1]
+        if self.rel_pos_emb:
+            assert x.shape[1] == self.max_seq_len, f"The tensor x should have a dimension 1 (python indices) size of {self.max_seq_len}." \
+                                                   f"Got {x.shape[1]} instead!"
 
         if self.counter == 0:
             x = self.embedding(x)
 
             if not self.rel_pos_emb:
                 x *= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
-                x += self.pos_encoding[:, :seq_len, :]
+                x += self.pos_encoding[:, :x.shape[1], :]
                 x /= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))
             x = self.dropout(x, training=training)
 
@@ -186,7 +220,24 @@ class NMEncoder(tf.keras.layers.Layer):
         else:
             raise Exception(f"Invalid mode parameter. Got mode: {self.mode}! \n"
                             f"It should be equal to \"n_layers\" or \"one\"!")
-        return x, attention_weights
+
+        x_dict = dict()
+        if self.counter == 0:  # i.e. we are at the end and it has been reset to zero.
+            for key, layer in self.parallel_layers.items(): # NOTE: to not run through below, put in restrictions all layrs...
+                if key in restrictions: continue  #i.e. we aren't computing a certain branch
+                out, out_no_grad, attn_weights = x, tf.stop_gradient(x), []
+                for l in layer[0]:
+                    out, aw = l(out, training, mask)  # out.shape = (batch_size, seq_len, varies)
+                    attn_weights.append(aw)
+                aux_pred = None
+                # run through again but with gradient cutoff from `base' layers (this is for an auxiliary loss)
+                if layer[1] is not None and training:
+                    for l in layer[0]:
+                        out_no_grad, aw = l(out_no_grad, training, mask)  # out.shape = (batch_size, seq_len, varies)
+                    aux_pred = layer[1](out_no_grad)  # modifies the last dimension to d_mod
+                x_dict[key] = (out, attn_weights, aux_pred)  # this will be a tuple containing the output (x, attn_weights)
+
+        return x, attention_weights, x_dict
 
     def increment_counter(self):
         self.counter += 1
@@ -387,7 +438,7 @@ class MetacognitionSequenceLayer(tf.keras.layers.Layer):
 
         out2 = self.ffn(out1)
         out2 = self.dropout2(out2, training=training)
-        # residual and dropout removed here as never want these values to equal 0 and the residual connection modifies the dimenisons???
+        out2 = out1 + out2
 
         return out2, attn_weights
 
@@ -432,7 +483,7 @@ class MetacognitionSingleLayer(tf.keras.layers.Layer):
         self.dropout1 = tf.keras.layers.Dropout(rate)
         self.dropout2 = tf.keras.layers.Dropout(rate)
 
-    def call(self, x, traMetacognitionSingleLayerining, mask):
+    def call(self, x, training, mask):
         '''
         Function: call \n
         Description: Overrides parent class's call function (i.e. one run through EncoderLayer). \n
@@ -453,7 +504,7 @@ class MetacognitionSingleLayer(tf.keras.layers.Layer):
 
         out2 = self.ffn(out1)
         out2 = self.dropout2(out2, training=training)
-        # residual and dropout removed here as never want these values to equal 0 and the residual connection modifies the dimenisons.
+        out2 = out1 + out2
 
         return out2, attn_weights
 

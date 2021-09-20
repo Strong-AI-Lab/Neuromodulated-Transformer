@@ -48,7 +48,7 @@ class SlidingWindowTrain(ParentTrainNL):
 
     def train_step(self, tar_inp, tar_real, nm_inp, num_aux_tokens, isStart):
 
-        #norm = 0.1 # this is hardcoded, consider changing to a passable parameter to the training function.
+        norm = 0.1 # this is hardcoded, consider changing to a passable parameter to the training function, or at initialization as a class parameter.
 
         nm_mask = create_combined_mask(nm_inp, self.padding_id, num_aux_tokens)
         dec_mask = create_combined_mask(tar_inp, self.padding_id)
@@ -62,9 +62,7 @@ class SlidingWindowTrain(ParentTrainNL):
             loss_ = loss/size
 
         gradients = tape.gradient(loss_, self.model.trainable_variables)
-
-        #gradients = [tf.clip_by_norm(g, norm)
-        #         for g in gradients]
+        gradients = [tf.clip_by_norm(g, norm) for g in gradients]
 
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
@@ -131,7 +129,7 @@ class SlidingWindowTrain(ParentTrainNL):
                         self._run_validation(e, save_filepath_val, data_dict["val"],
                                              num_aux_tokens, iteration_counter)
 
-                if (iteration_counter) % 2000 == 0:
+                if (iteration_counter) % 3000 == 0:
                     ckpt_save_path = self.ckpt_manager.save()
                     print(f'Saving checkpoint for iteration {iteration_counter} at {ckpt_save_path}')
 
@@ -276,7 +274,7 @@ def loss_function_window_size(real, pred, loss_object, padding_id, window_size, 
             mask = mask * mask2  # any 0 in both masks will remain a zero, otherwise the item will be a one.
         else:
             print("mask2 is None when it shouldn't be --> running withoug mask2!\n"
-                  "If during training on multiple GPUs then this handles 0 batch size inputs without raising an error")
+                  "If during training on multiple GPUs then this handles 0 batch size inputs at the end of an epoch")
 
         # if error try stop gradient?
     else:

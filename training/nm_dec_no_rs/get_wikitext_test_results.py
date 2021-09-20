@@ -1,7 +1,7 @@
 import os
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,3,4"
 GPUS_AVAILABLE = 3
 
 import sys
@@ -27,7 +27,7 @@ from models.NMTransformer import NMTransformer
 from text_processing.tokenizer import Tokenizer
 from transformers import TransfoXLTokenizer
 from load_datasets.language_modelling.load_wikitext import *
-from models.Model_Hyperparameters.model_hyperparameters import TestModel
+from models.Model_Hyperparameters.model_hyperparameters import *
 
 
 def get_generator(tokenizer, filepath="/large_data/wikitext-103/wiki.valid.tokens", load_strategy="default", load_data=[False, ""],
@@ -42,7 +42,7 @@ def get_generator(tokenizer, filepath="/large_data/wikitext-103/wiki.valid.token
 
 if __name__ == "__main__":
 
-    config = TestModel(strategy="MirroredStrategy", batch_size=8*GPUS_AVAILABLE, rate=0.1) #TODO add pad token... and others
+    config = WikitextBigAbsPosEmb(strategy="MirroredStrategy", batch_size=4*GPUS_AVAILABLE, rate=0.1) #TODO add pad token... and others
 
     strategy = config.strategy
     # strategy = None
@@ -98,29 +98,29 @@ if __name__ == "__main__":
                                      load_data=[True, "/large_data/wikitext-103/processed_data/val_heading_default_strategy.txt"],
                                      batch_size=config.batch_size,
                                      process_strategy=process_strategy,
-                                     window_size=32, shuffle=False,
+                                     window_size=1, shuffle=False,
                                      max_seq_len=max_seq_len_dec,
                                      tokenizer=config.tokenizer)
     if strategy is not None:
         data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
 
+
     data_dict["test"] = get_generator(filepath="/large_data/wikitext-103/wiki.test.tokens",
                                       load_data=[True, "/large_data/wikitext-103/processed_data/test_heading_default_strategy.txt"],
                                       batch_size=config.batch_size,
                                       process_strategy=process_strategy,
-                                      window_size=32, shuffle=False,
+                                      window_size=1, shuffle=False,
                                       max_seq_len=max_seq_len_dec,
                                       tokenizer=config.tokenizer)
     if strategy is not None:
-        data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
+        data_dict["test"] = strategy.experimental_distribute_dataset(data_dict["test"])
 
     train_class = SlidingWindowTrain(transformer, optimizer, config.loss_object, loss_function_window_size, config.tokenizer,
-                                     checkpoint_path_recent="../../checkpoints/v3_test/",
+                                     checkpoint_path_recent="../../checkpoints/Wikitext_abs_emb_bigmodel/",
                                      checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
                                      recent_to_keep=50, load_recent=False, best_to_keep=5, load_best=False,
-                                     window_size_train=max_seq_len_dec, window_size_val=32,
-                                     load_specific_path="/data/kkno604/Neuromodulated-Transformer/checkpoints/v3_test/ckpt-17")
+                                     window_size_train=max_seq_len_dec, window_size_val=1,
+                                     load_specific_path="/data/kkno604/Neuromodulated-Transformer/checkpoints/Wikitext_abs_emb_bigmodel/ckpt-53")
 
     print(f"Validation results: {train_class.run_no_train(data_dict['val'], 0)}")
     print(f"Test results: {train_class.run_no_train(data_dict['test'], 0)}") # Note that this uses the val window size above (SlidingWindowTrain....) best to keep them the same.
-
