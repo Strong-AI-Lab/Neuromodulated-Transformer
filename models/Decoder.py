@@ -198,7 +198,9 @@ class Decoder(tf.keras.layers.Layer):
 
         # possible values are ["n_layers", "one"]
         self.mode = "n_layers"
-        self.counter = 0
+        self.counter = 0 
+
+        ## NOTE: extra spaces here..., did I delete something?
 
         self.embedding = tf.keras.layers.Embedding(target_vocab_size, d_model)
         self.pos_encoding = positional_encoding(max_position_encoding, d_model)
@@ -214,7 +216,7 @@ class Decoder(tf.keras.layers.Layer):
                                             rate, nm_attn, nm_eol,
                                             rel_pos_emb=rel_pos_emb)] # the gradient should never be stopped here, only potentially in the first N-1 layers.
 
-        self.dropout = tf.keras.layers.Dropout(rate)
+        self.dropout = tf.keras.layers.Dropout(rate) 
 
     def call(self, x, training, mask, nm_encoder_input=None):
         '''
