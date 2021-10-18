@@ -84,12 +84,12 @@ class NMTransformerEncDecTrain(ParentTrainNL):
 
         #loss_enc, size_enc, loss_dec, size_dec = 0, 0, 0, 0
         loss, size = 0, 0
-        correct, total = 0, 0
+        #correct, total = 0, 0
         with tf.GradientTape() as tape:
             predictions, _, _, _, _ = self.model(inp_id, nm_inp_id, training=True, nm_mask=nm_mask, dec_mask=dec_mask) # ret (output, attention weights, nm_output)
             #predictions.shape == (batch_size, seq_len, target_vocab_size)
             #pred = self._end_tok_pred_helper(predictions, inp_id) # (batch_size, target_vocab_size)
-            correct, total = self._get_accuracy(predictions, label)
+            #correct, total = self._get_accuracy(predictions, label)
             #print(f"Correct: {correct} \nTotal: {total}")
             # label.shape == (batch_size)
             # pred.shape == (batch_size, target_vocab_size)
@@ -100,7 +100,7 @@ class NMTransformerEncDecTrain(ParentTrainNL):
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
         #return loss_enc, size_enc, loss_dec, size_dec
-        return loss, size, correct, total
+        return loss, size#, correct, total
 
     '''
     def _end_tok_pred_helper(self, predictions, inp_id):
@@ -160,26 +160,29 @@ class NMTransformerEncDecTrain(ParentTrainNL):
                     correct += 1
         return correct, total
 
+    def _get_accuracy_test(self):
+        pass
+
     @tf.function
     def _distributed_train_step(self, inp_id, tar_id, nm_inp_id, num_aux_tokens):
         if self.strategy is not None:
-            loss, size, correct, total = self.strategy.run(self.train_step, args=(inp_id, tar_id, nm_inp_id, num_aux_tokens,))
+            loss, size = self.strategy.run(self.train_step, args=(inp_id, tar_id, nm_inp_id, num_aux_tokens,))
 
             # The if else may be totally irrelevant.
             if self.strategy.num_replicas_in_sync > 1:
                 loss = tf.reduce_sum(loss.values)
                 size = tf.reduce_sum(size.values)
-                correct = tf.reduce_sum(correct.values)
-                total = tf.reduce_sum(total.values)
+                #correct = tf.reduce_sum(correct.values)
+                #total = tf.reduce_sum(total.values)
             else:
                 loss = tf.reduce_sum(loss)
                 size = tf.reduce_sum(size)
-                correct = tf.reduce_sum(correct)
-                total = tf.reduce_sum(total)
+                #correct = tf.reduce_sum(correct)
+                #total = tf.reduce_sum(total)
         else:
-            loss, size, correct, total = self.train_step(inp_id, tar_id, nm_inp_id, num_aux_tokens)
+            loss, size = self.train_step(inp_id, tar_id, nm_inp_id, num_aux_tokens)
 
-        return loss, size, correct, total
+        return loss, size#, correct, total
 
     def train_iteration(self, epoch_start, epoch_end, iteration_counter, save_filepath_train, save_filepath_val,
                         data_dict, num_aux_tokens, save_end_epoch=True, print_every_iterations=100,
@@ -197,25 +200,29 @@ class NMTransformerEncDecTrain(ParentTrainNL):
 
                 iteration_counter += 1  # one iteration is defined to be one batch.
 
-                loss, size, correct, total = self._distributed_train_step(inp_id, label, nm_inp_id, num_aux_tokens)
+                loss, size = self._distributed_train_step(inp_id, label, nm_inp_id, num_aux_tokens)
                 if size == 0:
                     print(f"The size is zero, skip the current batch, it will not be counted due to an error!")
                     continue  # start the next batch.
 
                 epoch_loss_total += loss
                 epoch_size_total += size
-                correct_samples += correct
-                total_samples += total
+                #correct_samples += correct
+                #total_samples += total
 
                 # loss for the current batch.
                 #loss_ = (loss_enc+loss_dec) / (size_enc+size_dec)
                 loss_ = loss / size
                 loss_ = tf.cast(loss_, dtype=tf.dtypes.float32)
                 # (decoder).
-                accuracy_ = correct/total
+                #if total == 0:
+                #    accuracy_ = None
+                #else:
+                #    accuracy_ = correct/total
+                accuracy_ = None
 
                 if iteration_counter % print_every_iterations == 0:
-                    print(f'Iteration {iteration_counter} Epoch {e+1} Batch {batch+1} Loss {loss_:.4f} Accuracy {accuracy_:.4f}')
+                    print(f'Iteration {iteration_counter} Epoch {e+1} Batch {batch+1} Loss {loss_:.4f} Accuracy {accuracy_}')
                 batch += 1
 
                 if (iteration_counter) % save_every_iterations == 0:
@@ -226,8 +233,11 @@ class NMTransformerEncDecTrain(ParentTrainNL):
                 self._save_iteration_results_nm("train", iteration_counter, save_filepath_train, header, loss_, accuracy_)
 
             total_loss = epoch_loss_total / epoch_size_total  # this is the loss of all words divided by the number of words (while eliminating the effect of the padding tokens)
-            total_accuracy = correct_samples/total_samples
-            print(f'Epoch {e+1} Loss {total_loss:.4f}')
+            if total_samples == 0:
+                total_accuracy = None
+            else:
+                total_accuracy = correct_samples/total_samples
+            print(f'Epoch {e+1} Loss {total_loss:.4f} Accuracy {total_accuracy}')
             print(f'Time taken for epoch {e+1}: {time.time() - start:.2f} secs\n')
 
             header = True if e == 0 else False
@@ -275,41 +285,40 @@ class NMTransformerEncDecTrain(ParentTrainNL):
 
         #loss_enc, size_enc, loss_dec, size_dec = 0, 0, 0, 0
         loss, size = 0, 0
-        correct, total = 0, 0
+        #correct, total = 0, 0
         with tf.GradientTape() as tape:
             predictions, _, _, _, _ = self.model(inp_id, nm_inp_id, training=False, nm_mask=nm_mask, dec_mask=dec_mask) # ret (output, attention weights, nm_output)
             #predictions.shape == (batch_size, seq_len, target_vocab_size)
 
             #pred = self._end_tok_pred_helper(predictions, inp_id) # (batch_size, target_vocab_size)
-            correct, total = self._get_accuracy(predictions, label)
+            #correct, total = self._get_accuracy(predictions, label)
             # label.shape == (batch_size)
             # pred.shape == (batch_size, target_vocab_size)
             loss, size = self.loss_function(label, predictions, self.loss_object, self.padding_id)
 
         #return loss_enc, size_enc, loss_dec, size_dec
-        return loss, size, correct, total
+        return loss, size#, #correct, total
 
     @tf.function
     def _distributed_val_step(self, inp_id, tar_id, nm_inp_id, num_aux_tokens):
         if self.strategy is not None:
-            loss, size, correct, total = self.strategy.run(self.val_step,
-                                                           args=(inp_id, tar_id, nm_inp_id, num_aux_tokens,))
+            loss, size = self.strategy.run(self.val_step, args=(inp_id, tar_id, nm_inp_id, num_aux_tokens,))
 
             # The if else may be totally irrelevant.
             if self.strategy.num_replicas_in_sync > 1:
                 loss = tf.reduce_sum(loss.values)
                 size = tf.reduce_sum(size.values)
-                correct = tf.reduce_sum(correct.values)
-                total = tf.reduce_sum(total.values)
+                #correct = tf.reduce_sum(correct.values)
+                #total = tf.reduce_sum(total.values)
             else:
                 loss = tf.reduce_sum(loss)
                 size = tf.reduce_sum(size)
-                correct = tf.reduce_sum(correct)
-                total = tf.reduce_sum(total)
+                #correct = tf.reduce_sum(correct)
+                #total = tf.reduce_sum(total)
         else:
-            loss, size, correct, total = self.train_step(inp_id, tar_id, nm_inp_id, num_aux_tokens)
+            loss, size = self.val_step(inp_id, tar_id, nm_inp_id, num_aux_tokens)
 
-        return loss, size, correct, total
+        return loss, size
 
     def _run_validation(self, e, save_filepath, validation, num_aux_tokens, iteration_counter=None):
         start = time.time()
@@ -319,24 +328,27 @@ class NMTransformerEncDecTrain(ParentTrainNL):
         correct_samples = 0
         total_samples = 0
         for (inp_str, inp_id, label, nm_inp_id) in validation:
-            loss, size, correct, total = self._distributed_val_step(tar_inp, tar_real, nm_inp, num_aux_tokens)
+            loss, size = self._distributed_val_step(inp_id, label, nm_inp_id, num_aux_tokens)
             epoch_loss_total += loss
             epoch_size_total += size
-            correct_samples += correct
-            total_samples += total
+            #correct_samples += correct
+            #total_samples += total
 
         total_loss = epoch_loss_total / epoch_size_total  # this is the loss of all words divided by the number of words (while eliminating the effect of the padding tokens)
-        total_accuracy = correct_samples/total_samples
-        print(f'Epoch {e + 1} Val Loss {total_loss:.4f} Val Accuracy {total_accuracy:.4f}')
-        print(f'Time taken for one epoch (val) {e + 1}: {time.time() - start:.2f} secs\n')
+        if total_samples == 0:
+            total_accuracy = None
+        else:
+            total_accuracy = correct_samples/total_samples
+        print(f'Epoch {e+1} Val Loss {total_loss:.4f} Val Accuracy {total_accuracy}')
+        print(f'Time taken for one epoch (val) {e+1}: {time.time() - start:.2f} secs\n')
 
         if iteration_counter is None:
             header = True if e == 0 else False
-            self._save_epoch_results("val", e+1, save_filepath, header, total_loss, total_accuracy)
+            self._save_epoch_results_nm("val", e+1, save_filepath, header, total_loss, total_accuracy)
         else:
             header = True if iteration_counter == 1 else False  # todo this is broken.
             # note: here the iteration refers to the iteration in the training loop.
-            self._save_iteration_results("val", iteration_counter, save_filepath, header, total_loss, total_accuracy)
+            self._save_iteration_results_nm("val", iteration_counter, save_filepath, header, total_loss, total_accuracy)
 
     def _save_epoch_results_nm(self, type_, epoch, save_filepath, header, total_loss, accuracy):
         assert isinstance(type_, str) and isinstance(save_filepath, str)
@@ -351,6 +363,61 @@ class NMTransformerEncDecTrain(ParentTrainNL):
         with open(file, "a") as f:
             if header: f.write("Iteration Loss Accuracy \n")
             f.write(f"{iteration} {total_loss} {accuracy} \n")
+
+    def generate_answer_test(self, e, save_filepath, data, num_aux_tokens, max_generate_len=100): # greedy decoding.
+        #print(f"This generate_answer_test function gets the loss and accuracy on the data. \n"
+        #      f"The data's format should be (input_string (w/out teacher forcing), input_id (w/out teacher forcing), "
+        #      f"correct_ans(e.g. A or B...) in id format)")
+        # input should be (input_string(no correct ans), input_id(no correct ans), ans_options, correct_answer, )
+        start = time.time()
+
+        epoch_loss_total = 0  # sum up all of the losses
+        epoch_size_total = 0  # then divide by the total number of losses.
+        correct_samples = 0
+        total_samples = 0
+        for (inp_str, inp_id, all_labels, cor_label, nm_inp_id) in data: # note: in all labels
+            #loss, size = self._distributed_val_step(inp_id, label, nm_inp_id, num_aux_tokens)
+            loss, size, correct, total = self._distributed_test_step(inp_str, inp_id, all_labels, cor_label, nm_inp_id) # TODO
+            epoch_loss_total += loss
+            epoch_size_total += size
+            correct_samples += correct
+            total_samples += total
+
+        total_loss = epoch_loss_total / epoch_size_total  # this is the loss of all words divided by the number of words (while eliminating the effect of the padding tokens)
+        total_accuracy = correct_samples / total_samples
+        print(f'Test Loss {total_loss:.4f} Test Accuracy {total_accuracy} correct: {correct_samples} total: {total_samples}')
+        print(f'Time taken: {time.time() - start:.2f} secs\n')
+
+        header = True if e == 0 else False
+        self._save_epoch_results_nm("test", e+1, save_filepath, header, total_loss, total_accuracy)
+
+    @tf.function
+    def _distributed_test_step(self, inp_str, inp_id, all_labels, cor_label, nm_inp_id):
+        if self.strategy is not None:
+            loss, size, correct, total = self.strategy.run(self.test_step, args=(inp_str, inp_id, all_labels, cor_label, nm_inp_id,))
+
+            # The if else may be totally irrelevant.
+            if self.strategy.num_replicas_in_sync > 1:
+                loss = tf.reduce_sum(loss.values)
+                size = tf.reduce_sum(size.values)
+                correct = tf.reduce_sum(correct.values)
+                total = tf.reduce_sum(total.values)
+            else:
+                loss = tf.reduce_sum(loss)
+                size = tf.reduce_sum(size)
+                correct = tf.reduce_sum(correct)
+                total = tf.reduce_sum(total)
+        else:
+            loss, size, correct, total = self.test_step(inp_str, inp_id, all_labels, cor_label, nm_inp_id)
+
+        return loss, size, correct, total
+
+    def test_step(self): # todo
+        pass
+
+    def _accuracy_helper(self): # todo
+        pass
+
 
 # TODO loss function for decoder (language modelling only)
 def loss_function_decoder(target, prediction, loss_object, padding_id):
@@ -377,3 +444,12 @@ def loss_function_end_tok_only(label, prediction, loss_object, padding_id):
     mask = tf.cast(mask, dtype=loss_.dtype)  # convert the mask to the correct format.
     loss_ *= mask  # apply masking to positions that correspond to a <pad> token in the target.
     return tf.reduce_sum(loss_), tf.reduce_sum(mask)
+
+def pad_loss_function(label, prediction, loss_object, padding_id):
+    # same as above loss functions, could simplify but it doesn't really matter.
+    mask = tf.math.logical_not(tf.math.equal(label, padding_id))  # padding mask
+    loss_ = loss_object(label, prediction)  # get loss from the loss_object
+    mask = tf.cast(mask, dtype=loss_.dtype)  # convert the mask to the correct format.
+    loss_ *= mask  # apply masking to positions that correspond to a <pad> token in the target.
+    return tf.reduce_sum(loss_), tf.reduce_sum(mask)
+

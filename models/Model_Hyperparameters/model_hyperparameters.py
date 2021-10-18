@@ -186,7 +186,8 @@ class FinalModelSmall:
         self.loss_object = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False,
                                                                          reduction='none')
         #self.learning_rate = tf.keras.optimizers.schedules.CosineDecay(0.001, decay_steps=5000000)
-        self.learning_rate = tf.keras.optimizers.schedules.CosineDecay(0.0001, decay_steps=1000000)
+        #self.learning_rate = tf.keras.optimizers.schedules.CosineDecay(0.0001, decay_steps=1000000)
+        self.learning_rate = 0.0001
 
         self.rel_pos_emb = True
         self.max_position_encoding_dec = self.max_seq_len_dec

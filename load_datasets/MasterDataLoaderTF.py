@@ -171,8 +171,97 @@ class MasterDataLoaderTF(object):
                                                                        reread_rs=self.reread_rs, summarize_rs=self.summarize_rs,
                                                                        paraphrase_rs=self.paraphrase_rs,
                                                                        tokenizer=self.tokenizer)
+            elif key == "RACE_high_train":
+                self.dataLoaders["RACE_high_train"] = RACEDataLoader(strategy="train", filepath=self.filepaths["RACE_high_train"],
+                                                                       enc_tok=self.enc_tok, dec_tok=self.dec_tok, mlm_tok=self.mlm_tok, lm_tok=self.lm_tok,
+                                                                       start_tok=self.start_tok, end_tok=self.end_tok, cls_tok=self.cls_tok,
+                                                                       sep_tok=self.sep_tok, mask_tok=self.mask_tok, pad_tok=self.pad_tok, seq_len=self.seq_len,
+                                                                       pad=False,
+                                                                       a1=self.a1, a2=self.a2, a3=self.a3, a4=self.a4,
+                                                                       a5=self.a5, a6=self.a6, a7=self.a7, a8=self.a8, a9=self.a9,
+                                                                       passage=self.passage, p1=self.p1, p2=self.p2,
+                                                                       p3=self.p3, p4=self.p4, p5=self.p5, p6=self.p6,
+                                                                       p7=self.p7, p8=self.p8, p9=self.p9, mqa=self.mqa,
+                                                                       pmqa=self.pmqa, bmqa=self.bmqa, peentailment=self.peentailment,
+                                                                       pbentailment=self.pbentailment, pcoreference=self.pcoreference,
+                                                                       bcoreference=self.bcoreference, psentiment=self.psentiment,
+                                                                       pgqa=self.pgqa, psqa=self.psqa, gqa=self.gqa, pbqa=self.pbqa,
+                                                                       placeholder=self.placeholder, translation=self.translation,
+                                                                       hypothesis=self.hypothesis, question=self.question,
+                                                                       metacognition=self.metacognition, unk_rs=self.unk_rs,
+                                                                       aoint_rs=self.aoint_rs, highlighting_rs=highlighting_rs,
+                                                                       reread_rs=self.reread_rs, summarize_rs=self.summarize_rs,
+                                                                       paraphrase_rs=self.paraphrase_rs,
+                                                                       tokenizer=self.tokenizer)
             elif key == "RACE_middle_val":
                 self.dataLoaders["RACE_middle_val"] = RACEDataLoader(strategy="val", filepath=self.filepaths["RACE_middle_val"],
+                                                                       enc_tok=self.enc_tok, dec_tok=self.dec_tok, mlm_tok=self.mlm_tok, lm_tok=self.lm_tok,
+                                                                       start_tok=self.start_tok, end_tok=self.end_tok, cls_tok=self.cls_tok,
+                                                                       sep_tok=self.sep_tok, mask_tok=self.mask_tok, pad_tok=self.pad_tok, seq_len=self.seq_len,
+                                                                       pad=False,
+                                                                       a1=self.a1, a2=self.a2, a3=self.a3, a4=self.a4,
+                                                                       a5=self.a5, a6=self.a6, a7=self.a7, a8=self.a8, a9=self.a9,
+                                                                       passage=self.passage, p1=self.p1, p2=self.p2,
+                                                                       p3=self.p3, p4=self.p4, p5=self.p5, p6=self.p6,
+                                                                       p7=self.p7, p8=self.p8, p9=self.p9, mqa=self.mqa,
+                                                                       pmqa=self.pmqa, bmqa=self.bmqa, peentailment=self.peentailment,
+                                                                       pbentailment=self.pbentailment, pcoreference=self.pcoreference,
+                                                                       bcoreference=self.bcoreference, psentiment=self.psentiment,
+                                                                       pgqa=self.pgqa, psqa=self.psqa, gqa=self.gqa, pbqa=self.pbqa,
+                                                                       placeholder=self.placeholder, translation=self.translation,
+                                                                       hypothesis=self.hypothesis, question=self.question,
+                                                                       metacognition=self.metacognition, unk_rs=self.unk_rs,
+                                                                       aoint_rs=self.aoint_rs, highlighting_rs=highlighting_rs,
+                                                                       reread_rs=self.reread_rs, summarize_rs=self.summarize_rs,
+                                                                       paraphrase_rs=self.paraphrase_rs,
+                                                                       tokenizer=self.tokenizer)
+            elif key == "RACE_high_val":
+                self.dataLoaders["RACE_high_val"] = RACEDataLoader(strategy="val", filepath=self.filepaths["RACE_high_val"],
+                                                                       enc_tok=self.enc_tok, dec_tok=self.dec_tok, mlm_tok=self.mlm_tok, lm_tok=self.lm_tok,
+                                                                       start_tok=self.start_tok, end_tok=self.end_tok, cls_tok=self.cls_tok,
+                                                                       sep_tok=self.sep_tok, mask_tok=self.mask_tok, pad_tok=self.pad_tok, seq_len=self.seq_len,
+                                                                       pad=False,
+                                                                       a1=self.a1, a2=self.a2, a3=self.a3, a4=self.a4,
+                                                                       a5=self.a5, a6=self.a6, a7=self.a7, a8=self.a8, a9=self.a9,
+                                                                       passage=self.passage, p1=self.p1, p2=self.p2,
+                                                                       p3=self.p3, p4=self.p4, p5=self.p5, p6=self.p6,
+                                                                       p7=self.p7, p8=self.p8, p9=self.p9, mqa=self.mqa,
+                                                                       pmqa=self.pmqa, bmqa=self.bmqa, peentailment=self.peentailment,
+                                                                       pbentailment=self.pbentailment, pcoreference=self.pcoreference,
+                                                                       bcoreference=self.bcoreference, psentiment=self.psentiment,
+                                                                       pgqa=self.pgqa, psqa=self.psqa, gqa=self.gqa, pbqa=self.pbqa,
+                                                                       placeholder=self.placeholder, translation=self.translation,
+                                                                       hypothesis=self.hypothesis, question=self.question,
+                                                                       metacognition=self.metacognition, unk_rs=self.unk_rs,
+                                                                       aoint_rs=self.aoint_rs, highlighting_rs=highlighting_rs,
+                                                                       reread_rs=self.reread_rs, summarize_rs=self.summarize_rs,
+                                                                       paraphrase_rs=self.paraphrase_rs,
+                                                                       tokenizer=self.tokenizer)
+
+            elif key == "RACE_middle_test":
+                self.dataLoaders["RACE_middle_test"] = RACEDataLoader(strategy="test", filepath=self.filepaths["RACE_middle_test"],
+                                                                       enc_tok=self.enc_tok, dec_tok=self.dec_tok, mlm_tok=self.mlm_tok, lm_tok=self.lm_tok,
+                                                                       start_tok=self.start_tok, end_tok=self.end_tok, cls_tok=self.cls_tok,
+                                                                       sep_tok=self.sep_tok, mask_tok=self.mask_tok, pad_tok=self.pad_tok, seq_len=self.seq_len,
+                                                                       pad=False,
+                                                                       a1=self.a1, a2=self.a2, a3=self.a3, a4=self.a4,
+                                                                       a5=self.a5, a6=self.a6, a7=self.a7, a8=self.a8, a9=self.a9,
+                                                                       passage=self.passage, p1=self.p1, p2=self.p2,
+                                                                       p3=self.p3, p4=self.p4, p5=self.p5, p6=self.p6,
+                                                                       p7=self.p7, p8=self.p8, p9=self.p9, mqa=self.mqa,
+                                                                       pmqa=self.pmqa, bmqa=self.bmqa, peentailment=self.peentailment,
+                                                                       pbentailment=self.pbentailment, pcoreference=self.pcoreference,
+                                                                       bcoreference=self.bcoreference, psentiment=self.psentiment,
+                                                                       pgqa=self.pgqa, psqa=self.psqa, gqa=self.gqa, pbqa=self.pbqa,
+                                                                       placeholder=self.placeholder, translation=self.translation,
+                                                                       hypothesis=self.hypothesis, question=self.question,
+                                                                       metacognition=self.metacognition, unk_rs=self.unk_rs,
+                                                                       aoint_rs=self.aoint_rs, highlighting_rs=highlighting_rs,
+                                                                       reread_rs=self.reread_rs, summarize_rs=self.summarize_rs,
+                                                                       paraphrase_rs=self.paraphrase_rs,
+                                                                       tokenizer=self.tokenizer)
+            elif key == "RACE_high_test":
+                self.dataLoaders["RACE_high_test"] = RACEDataLoader(strategy="test", filepath=self.filepaths["RACE_high_test"],
                                                                        enc_tok=self.enc_tok, dec_tok=self.dec_tok, mlm_tok=self.mlm_tok, lm_tok=self.lm_tok,
                                                                        start_tok=self.start_tok, end_tok=self.end_tok, cls_tok=self.cls_tok,
                                                                        sep_tok=self.sep_tok, mask_tok=self.mask_tok, pad_tok=self.pad_tok, seq_len=self.seq_len,
@@ -234,9 +323,76 @@ class MasterDataLoaderTF(object):
                 # need tf.string... here.
             if break_: break # TODO what happens if batch size is not fully complete? Doesn't really matter, the generator will handle it...
 
+    def _combined_helper(self):
+
+        if self.type == "RACE_combined_train":
+            assert "RACE_middle_train" in self.dataLoaders.keys() and "RACE_high_train" in self.dataLoaders.keys(), f"One of RACE_middle_train and/or RACE_high_train is not in the dataLoaders dictionary of dataloaders!"
+            gen1 = self.dataLoaders["RACE_middle_train"](mode="default")
+            gen2 = self.dataLoaders["RACE_high_train"](mode="default")
+            while True:
+                input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = next(gen1)
+                input_string2, input_id2, label2, aux_tok_12, aux_tok_22 = next(gen2)
+                if input_string1 is None and input_string2 is None:
+                    yield None, None, None, None, None
+                    break
+                elif input_string1 is None: # and input_string2 is not.
+                    yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
+                elif input_string2 is None: # and input_string2 is not.
+                    yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
+                else: # randomly choose between the two...
+                    if random.random() > 0.5: # yeild middle difficulty.
+                        yield input_string1, input_id1, label1, aux_tok_11, aux_tok_21
+                    else: # yield high dificulty.
+                        yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
+
+        elif self.type == "RACE_combined_val":
+            assert "RACE_middle_val" in self.dataLoaders.keys() and "RACE_high_val" in self.dataLoaders.keys(), f"One of RACE_middle_val and/or RACE_high_val is not in the dataLoaders dictionary of dataloaders!"
+            gen1 = self.dataLoaders["RACE_middle_val"](mode="default")
+            gen2 = self.dataLoaders["RACE_high_val"](mode="default")
+            while True:
+                input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = next(gen1)
+                input_string2, input_id2, label2, aux_tok_12, aux_tok_22 = next(gen2)
+                if input_string1 is None and input_string2 is None:
+                    yield None, None, None, None, None
+                    break
+                elif input_string1 is None:  # and input_string2 is not.
+                    yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
+                elif input_string2 is None:  # and input_string2 is not.
+                    yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
+                else:  # randomly choose between the two...
+                    if random.random() > 0.5:  # yeild middle difficulty.
+                        yield input_string1, input_id1, label1, aux_tok_11, aux_tok_21
+                    else:  # yield high dificulty.
+                        yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
+
+        elif self.type == "RACE_combined_test": # TODO update test to handle generation and testing mode...
+            assert "RACE_middle_test" in self.dataLoaders.keys() and "RACE_high_test" in self.dataLoaders.keys(), f"One of RACE_middle_test and/or RACE_high_test is not in the dataLoaders dictionary of dataloaders!"
+            gen1 = self.dataLoaders["RACE_middle_test"](mode="default")
+            gen2 = self.dataLoaders["RACE_high_test"](mode="default")
+            while True:
+                input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = next(gen1)
+                input_string2, input_id2, label2, aux_tok_12, aux_tok_22 = next(gen2)
+                if input_string1 is None and input_string2 is None:
+                    yield None, None, None, None, None
+                    break
+                elif input_string1 is None:  # and input_string2 is not.
+                    yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
+                elif input_string2 is None:  # and input_string2 is not.
+                    yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
+                else:  # randomly choose between the two...
+                    if random.random() > 0.5:  # yeild middle difficulty.
+                        yield input_string1, input_id1, label1, aux_tok_11, aux_tok_21
+                    else:  # yield high dificulty.
+                        yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
+
     def load_race(self):
 
-        mini_generator = self.dataLoaders[self.type](mode="default")
+        mini_generator = None
+        if self.type in ["RACE_middle_train", "RACE_middle_val", "RACE_high_train", "RACE_high_val",
+                         "RACE_middle_test", "RACE_high_test"]: # TODO update test to handle generation and testing mode...
+            mini_generator = self.dataLoaders[self.type](mode="default")
+        else:
+            mini_generator = self._combined_helper()
 
         while True:
             input_string, input_id, label, aux_tok_1, aux_tok_2 = next(mini_generator) # label will be a list of one element, the correct answer...
@@ -246,6 +402,10 @@ class MasterDataLoaderTF(object):
             if self.pad_to_max_length:
                 input_string = input_string + [self.pad_tok for _ in range(self.seq_len - len(input_string))]
                 input_id = input_id + [pad_tok_id for _ in range(self.seq_len - len(input_id))]
+                label = label + [pad_tok_id for _ in range(self.seq_len - len(label))]
+            #print(f"length of input_string: {len(input_string)} \n"
+            #      f"length of input_id: {len(input_id)} \n"
+            #      f"length of label: {len(label)}")
 
             null_tok = self.tokenizer.encode_single(self.null_tok)[0]
             nm_input_id = [aux_tok_1, aux_tok_2] + \
@@ -295,6 +455,54 @@ class MasterDataLoaderTF(object):
                                                                      tf.dtypes.int64,
                                                                      tf.dtypes.int64))
 
+        elif type == "RACE_high_train":
+            generator = tf.data.Dataset.from_generator(self.load_race,
+                                                       output_types=(tf.dtypes.string,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64))
+
+        elif type == "RACE_high_val":
+            generator = tf.data.Dataset.from_generator(self.load_race,
+                                                       output_types=(tf.dtypes.string,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64))
+
+        elif type == "RACE_medium_test":
+            generator = tf.data.Dataset.from_generator(self.load_race,
+                                                       output_types=(tf.dtypes.string,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64))
+        elif type == "RACE_high_test":
+            generator = tf.data.Dataset.from_generator(self.load_race,
+                                                       output_types=(tf.dtypes.string,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64))
+
+        elif type == "RACE_combined_train":
+            generator = tf.data.Dataset.from_generator(self.load_race,
+                                                       output_types=(tf.dtypes.string,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64))
+
+        elif type == "RACE_combined_val":
+            generator = tf.data.Dataset.from_generator(self.load_race,
+                                                       output_types=(tf.dtypes.string,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64))
+
+        elif type == "RACE_combined_test":
+            generator = tf.data.Dataset.from_generator(self.load_race,
+                                                       output_types=(tf.dtypes.string,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.int64))
+
         return generator
 
 if __name__ == "__main__":
@@ -303,7 +511,6 @@ if __name__ == "__main__":
     #tok = TransfoXLTokenizer.from_pretrained("transfo-xl-wt103")
     #tokenizer = Tokenizer(tok)
     #tokenizer.add_tokens_list(["<enc>", "<dec>", "<mlm>", "<lm>", "<s>", "</s>", "<cls>", "<sep>", "<mask>", "<pad>"])
-    #TODO tokenizer.add with updated tokens...
 
     tok = BertTokenizer.from_pretrained('bert-base-uncased')
     tokenizer = Tokenizer(tok)
@@ -318,7 +525,7 @@ if __name__ == "__main__":
     #             cls_tok="<cls>", sep_tok="<sep>", mask_tok="<mask>", pad_tok="<pad>",
     #             start_tok="<s>", end_tok="</s>", null_tok="<null>",
     #             num_reading_strategies=6, pad_to_max_length=True, strategy="random")
-    dloader = MasterDataLoaderTF(filepaths=filepaths, seq_len=768, batch_size=1, tokenizer=tokenizer)
+    dloader = MasterDataLoaderTF(filepaths=filepaths, seq_len=768, batch_size=12, tokenizer=tokenizer)
     '''
     filepaths: dict, seq_len: int, batch_size: int, tokenizer=None,
                  enc_tok="<enc>", dec_tok="<dec>", mlm_tok="<mlm>", lm_tok="<lm>",
@@ -337,7 +544,7 @@ if __name__ == "__main__":
     '''
 
 
-    generator = dloader.get_generator("RACE_middle_train", False).batch(4)
+    generator = dloader.get_generator("RACE_middle_train", False).batch(2)
     print(f"generator: {generator}")
     batch_ = 1
     print("REACH")
@@ -347,5 +554,8 @@ if __name__ == "__main__":
         #    f"inp_id.shape: {inp_id.shape} \t inp_id: {inp_id} \n"
         #      f"tar_id.shape: {tar_id.shape} \t tar_id: {tar_id} \n"
         #      f"nm_inp_id.shape: {nm_inp_id.shape} \t nm_inp_id: {nm_inp_id} \n")
-        if batch_ == 4: break
+        if batch_ == 1: break
         batch_ += 1
+    print(f"batch_ counter: {batch_}")
+
+    #30569, 2138, 1996, 3482, 2001, 3139, 2007, 1996, 8537, 1012, 30565, 30565

@@ -86,7 +86,9 @@ if __name__ == "__main__":
         optimizer = tf.keras.optimizers.Adam(learning_rate)
 
     filepaths = {"RACE_high_train": "/large_data/RACE/train/high/",
-                 "RACE_high_val": "/large_data/RACE/dev/high/"}
+                 "RACE_high_val": "/large_data/RACE/dev/high/",
+                 "RACE_middle_train": "/large_data/RACE/train/middle/",
+                 "RACE_middle_val": "/large_data/RACE/dev/middle/"}
     #dloader = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec,
     #                             batch_size=config.batch_size, tokenizer=config.tokenizer,
     #                             enc_tok="<enc>", dec_tok="<dec>", mlm_tok="<mlm>", lm_tok="<lm>",
@@ -96,7 +98,7 @@ if __name__ == "__main__":
     #                             pad_to_max_length=True, strategy="random",
     #                             C4_processed_filepath="/large_data/C4/en/../processed.txt")
     dloader_train = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size, tokenizer=config.tokenizer) # all of the other parameters are equal to the default value, so not included here.
-    generator_train = dloader_train.get_generator("RACE_high_train", False).batch(config.batch_size)
+    generator_train = dloader_train.get_generator("RACE_combined_train", False).batch(config.batch_size)
 
     data_dict = {}
     data_dict["train"] = generator_train
@@ -104,7 +106,7 @@ if __name__ == "__main__":
         data_dict["train"] = strategy.experimental_distribute_dataset(data_dict["train"])
 
     dloader_val = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size, tokenizer=config.tokenizer)  # all of the other parameters are equal to the default value, so not included here.
-    generator_val = dloader_val.get_generator("RACE_high_val", False).batch(config.batch_size)
+    generator_val = dloader_val.get_generator("RACE_combined_val", False).batch(config.batch_size)
 
     data_dict["val"] = generator_val
     if strategy is not None:
@@ -127,11 +129,11 @@ if __name__ == "__main__":
                                      checkpoint_path_recent="/home/kkno604/Documents/Final_model_pretraining/Checkpoints/RACE_hard_train_from_middle/",
                                      checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
                                      recent_to_keep=10, load_recent=False, best_to_keep=5, load_best=False,
-                                     load_specific_path="/home/kkno604/Documents/Final_model_pretraining/Checkpoints/RACE_middle_train/ckpt-442",
+                                     load_specific_path="/home/kkno604/Documents/Final_model_pretraining/Checkpoints/pretraining_c4_notable/ckpt-440",
                                      enc_tok_id=config.tokenizer.encode_single("<enc>")[0],
                                      dec_tok_id=config.tokenizer.encode_single("<dec>")[0],
                                      end_tok_id=config.tokenizer.encode_single("</s>")[0])
-    train_class.train_iteration(epoch_start=0, epoch_end=10, iteration_counter=0,
+    train_class.train_iteration(epoch_start=0, epoch_end=5, iteration_counter=0,
                                 save_filepath_train="/home/kkno604/Documents/Final_model_pretraining/Results/RACE_hard_train_from_middle/",
                                 save_filepath_val="/home/kkno604/Documents/Final_model_pretraining/Results/RACE_hard_train_from_middle/",
                                 data_dict=data_dict, num_aux_tokens=config.num_aux_tokens, save_end_epoch=True,

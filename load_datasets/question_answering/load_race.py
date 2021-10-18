@@ -33,7 +33,7 @@ class RACEDataLoader:
         '''
 
         self.filepath = filepath
-        self.filepath_list = [listf for listf in listdir(self.filepath) if isfile(join(self.filepath, listf))]
+        #self.filepath_list = [listf for listf in listdir(self.filepath) if isfile(join(self.filepath, listf))]
         self.strategy = strategy # train, validation, test -- train and validation will be the same.
         assert self.strategy in ["train", "validation", "val", "test"], f"The strategy should be one of 'train', 'validation' " \
                                                                         f"'val' or 'test', got {self.strategy}!"
@@ -570,6 +570,7 @@ class RACEDataLoader:
             print(f"The paraphrase_rs token id is: {self.paraphrase_rs_tok_id}")
 
         self.filenames = [name for name in listdir(self.filepath) if isfile(join(self.filepath, name))]
+        #self.filepath_list = [listf for listf in listdir(self.filepath) if isfile(join(self.filepath, listf))]
         #print(f"\n\n\n Filenames: {self.filenames} \n\n\n")
 
     def _map_latin_to_int_helper(self, latin: str):
@@ -591,52 +592,77 @@ class RACEDataLoader:
             data = json.load(f)
 
         self.race_passage = data["article"]
-        self.answer_char = [self._map_latin_to_int_helper(ao) for ao in data['answers']]
+        self.answer_char = [self._map_latin_to_int_helper(ao) for ao in data['answers']] # correct answer option.
         self.answer_options = [aos for aos in data['options']] # stores a list of lists, of which contain answer options for a given question.
         self.passage_questions = [ques for ques in data['questions']] # will be a list of strings...
 
     def __call__(self, mode: str):
         if mode == "default":
-            for item in self.filepath_list:
+            for item in self.filenames:
                 self.process_file(self.filepath+item)
 
                 for i, label in enumerate(self.answer_char):
 
                     input_ = ''
                     passage = self.race_passage
-                    input_ += self.p1 + " " + passage
-                    input_ += self.question + " " + self.passage_questions[i]
+                    input_ += " " + self.p1 + " " + passage
+                    input_ += " " + self.question + " " + self.passage_questions[i]
+                    correct_ao = ''
                     for j, answer_option in enumerate(self.answer_options[i]):
-                        if j == 0: input_ += self.a1 + " " + answer_option
-                        elif j == 1: input_ += self.a2 + " " + answer_option
-                        elif j == 2: input_ += self.a3 + " " + answer_option
-                        elif j == 3: input_ += self.a4 + " " + answer_option
-                        elif j == 4: input_ += self.a5 + " " + answer_option
-                        elif j == 5: input_ += self.a6 + " " + answer_option
-                        elif j == 6: input_ += self.a7 + " " + answer_option
-                        elif j == 7: input_ += self.a8 + " " + answer_option
-                        elif j == 8: input_ += self.a9 + " " + answer_option
+                        if j == 0:
+                            input_ += " " + self.a1 + " " + answer_option
+                            if self.a1 == label: correct_ao = answer_option
+                        elif j == 1:
+                            input_ += " " + self.a2 + " " + answer_option
+                            if self.a2 == label: correct_ao = answer_option
+                        elif j == 2:
+                            input_ += " " + self.a3 + " " + answer_option
+                            if self.a3 == label: correct_ao = answer_option
+                        elif j == 3:
+                            input_ += " " + self.a4 + " " + answer_option
+                            if self.a4 == label: correct_ao = answer_option
+                        elif j == 4:
+                            input_ += " " + self.a5 + " " + answer_option
+                            if self.a5 == label: correct_ao = answer_option
+                        elif j == 5:
+                            input_ += " " + self.a6 + " " + answer_option
+                            if self.a6 == label: correct_ao = answer_option
+                        elif j == 6:
+                            input_ += " " + self.a7 + " " + answer_option
+                            if self.a7 == label: correct_ao = answer_option
+                        elif j == 7:
+                            input_ += " " + self.a8 + " " + answer_option
+                            if self.a8 == label: correct_ao = answer_option
+                        elif j == 8:
+                            input_ += " " + self.a9 + " " + answer_option
+                            if self.a9 == label: correct_ao = answer_option
                         else: raise Exception(f"Too many answer options than what is supported (more than 9)")
                     input_ += " " + self.end_tok
+                    correct_label = answer_option + " " + self.end_tok
+                    #input_label = input_ + " " + correct_label
 
                     data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(input_, max_seq_len=10000000) # [0] is ids [1] is string version...
+                    label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(correct_label, max_seq_len=1000000)
 
-                    if len(data_id_string[1]) > self.seq_len: # handles if there is overflow. compress some of the passage.
+                    if len(data_id_string[1]+label_data_id_string[1]) > self.seq_len: # handles if there is overflow. compress some of the passage.
                         #note: if >= above, then case when they are equal causes the first element to be doubled twice...
                         #> is ok as the first element will never be reached, hence ok to add back in as done below.
-                        input_string = [data_id_string[1][0]] + data_id_string[1][-(self.seq_len-1):] # if overflow then remove parts of the passage
-                    else: input_string = data_id_string[1]
-                    #print(f"input_string: \n{input_string}")
+                        input_string = [data_id_string[1][0]] + (data_id_string[1]+label_data_id_string[1])[-(self.seq_len-1):] # if overflow then remove parts of the passage
+                    else: input_string = data_id_string[1]+label_data_id_string[1]
 
-                    if len(data_id_string[0]) > self.seq_len: # handles overflow.
-                        input_id = [data_id_string[0][0]] + data_id_string[0][-(self.seq_len-1):]  # if overflow then remove parts of the passage
-                    else: input_id = data_id_string[0]
+                    if len(data_id_string[0]+label_data_id_string[0]) > self.seq_len: # handles overflow.
+                        input_id = [data_id_string[0][0]] + (data_id_string[0]+label_data_id_string[0])[-(self.seq_len-1):]  # if overflow then remove parts of the passage
+                    else: input_id = data_id_string[0]+label_data_id_string[0]
 
-                    label_ = [self.pad_tok_id for i in range(len(input_id)-1)] + self.tokenizer.encode_single(label) + \
-                             [self.pad_tok_id for i in range(self.seq_len-len(input_id))] # mask out predictions in the tokenizer loss function class instead.
-                    #assert len(label_) == 1, f"The label must not be in the tokenizers vocbulary as the length of the list is greater than 1!"
+                    label_ = [self.pad_tok_id for i in range(len(input_id)-len(label_data_id_string[0])-1)] + label_data_id_string[0] + [self.end_tok_id]
+                    #         [blah, blah, ..., </s> correct_ao_1, correct_ao_2, </s>]
+                    # [<pad>, <pad>, ..., <pad>, correct_ao_1, correct_ao_2, </s>, <pad>]
+                    assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
+                                                         f"of the input id ({len(input_id)})"
+                    #print(f"input_: {input_} \n correct_label: {correct_label} \n")
+                    #print(f"input_id: {input_id} \n label_: {label_} \n")
 
-                    yield input_string, input_id, label_, self.enc_tok_id, self.pmqa_tok_id
+                    yield input_string, input_id, label_, self.dec_tok_id, self.pmqa_tok_id
         yield None, None, None, None, None
 
 
