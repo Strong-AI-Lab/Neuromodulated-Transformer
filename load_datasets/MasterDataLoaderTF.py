@@ -329,95 +329,300 @@ class MasterDataLoaderTF(object):
             assert "RACE_middle_train" in self.dataLoaders.keys() and "RACE_high_train" in self.dataLoaders.keys(), f"One of RACE_middle_train and/or RACE_high_train is not in the dataLoaders dictionary of dataloaders!"
             gen1 = self.dataLoaders["RACE_middle_train"](mode="default")
             gen2 = self.dataLoaders["RACE_high_train"](mode="default")
+            stop_gen1=False
+            stop_gen2=False
             while True:
-                input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = next(gen1)
-                input_string2, input_id2, label2, aux_tok_12, aux_tok_22 = next(gen2)
+
+                input_string, input_id, label, aux_tok_1, aux_tok_2 = None, None, None, None, None
+                curr_gen = ''
+                stop_all = True
+                if random.random() > 0.5:
+                    if not stop_gen1: # do gen1 first.
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen1)
+                        curr_gen = "gen1"
+                        stop_all = False
+                    elif not stop_gen2: # do gen2 if gen1 is finished.
+                        curr_gen = "gen2"
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen2)
+                        stop_all = False
+                else:
+                    if not stop_gen2: # do gen2 first.
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen2)
+                        curr_gen = "gen2"
+                        stop_all = False
+                    elif not stop_gen1: # do gen2 if gen1 is finished.
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen1)
+                        curr_gen = "gen1"
+                        stop_all = False
+
+                if stop_all:
+                    yield input_string, input_id, label, aux_tok_1, aux_tok_2 # will be all None
+                    break
+                if input_string is None and curr_gen == "gen1": # gen1 is finished, so don't output None and continue, also set stop_gen1 to True so we don't process it again.
+                    stop_gen1 = True
+                    continue
+                if input_string is None and curr_gen == "gen2":
+                    stop_gen2 = True
+                    continue
+
+                yield input_string, input_id, label, aux_tok_1, aux_tok_2
+
+
+                '''
+                if not stop_gen1:  # stop_gen1 is False.
+                    input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = next(gen1)
+                else:  # stop_gen1 is True
+                    input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = None, None, None, None, None
+                if not stop_gen2:  # stop_gen2 is False
+                    input_string2, input_id2, label2, aux_tok_12, aux_tok_22 = next(gen2)
+                else:  # stop_gen2 is True
+                    input_string2, input_id2, label2, aux_tok_12, aux_tok_22 = None, None, None, None, None
+
                 if input_string1 is None and input_string2 is None:
                     yield None, None, None, None, None
+                    stop_gen1 = True
+                    stop_gen2 = True
                     break
-                elif input_string1 is None: # and input_string2 is not.
+                elif input_string1 is None:  # and input_string2 is not.
+                    stop_gen1 = True
                     yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
-                elif input_string2 is None: # and input_string2 is not.
+                elif input_string2 is None:  # and input_string2 is not.
+                    stop_gen2 = True
                     yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
                 else: # randomly choose between the two...
                     if random.random() > 0.5: # yeild middle difficulty.
                         yield input_string1, input_id1, label1, aux_tok_11, aux_tok_21
                     else: # yield high dificulty.
                         yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
+                '''
 
         elif self.type == "RACE_combined_val":
             assert "RACE_middle_val" in self.dataLoaders.keys() and "RACE_high_val" in self.dataLoaders.keys(), f"One of RACE_middle_val and/or RACE_high_val is not in the dataLoaders dictionary of dataloaders!"
             gen1 = self.dataLoaders["RACE_middle_val"](mode="default")
             gen2 = self.dataLoaders["RACE_high_val"](mode="default")
+            stop_gen1 = False
+            stop_gen2 = False
             while True:
-                input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = next(gen1)
-                input_string2, input_id2, label2, aux_tok_12, aux_tok_22 = next(gen2)
+
+                input_string, input_id, label, aux_tok_1, aux_tok_2 = None, None, None, None, None
+                curr_gen = ''
+                stop_all = True
+                if random.random() > 0.5:
+                    if not stop_gen1:  # do gen1 first.
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen1)
+                        curr_gen = "gen1"
+                        stop_all = False
+                    elif not stop_gen2:  # do gen2 if gen1 is finished.
+                        curr_gen = "gen2"
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen2)
+                        stop_all = False
+                else:
+                    if not stop_gen2:  # do gen2 first.
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen2)
+                        curr_gen = "gen2"
+                        stop_all = False
+                    elif not stop_gen1:  # do gen2 if gen1 is finished.
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen1)
+                        curr_gen = "gen1"
+                        stop_all = False
+
+                if stop_all:
+                    yield input_string, input_id, label, aux_tok_1, aux_tok_2  # will be all None
+                    break
+                if input_string is None and curr_gen == "gen1":  # gen1 is finished, so don't output None and continue, also set stop_gen1 to True so we don't process it again.
+                    stop_gen1 = True
+                    continue
+                if input_string is None and curr_gen == "gen2":
+                    stop_gen2 = True
+                    continue
+
+                yield input_string, input_id, label, aux_tok_1, aux_tok_2
+
+            ''' 
+            while True:
+
+                if not stop_gen1: # stop_gen1 is False.
+                    input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = next(gen1)
+                else: # stop_gen1 is True
+                    input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = None, None, None, None, None
+                if not stop_gen2: # stop_gen2 is False
+                    input_string2, input_id2, label2, aux_tok_12, aux_tok_22 = next(gen2)
+                else: # stop_gen2 is True
+                    input_string2, input_id2, label2, aux_tok_12, aux_tok_22  = None, None, None, None, None
+
                 if input_string1 is None and input_string2 is None:
                     yield None, None, None, None, None
+                    stop_gen1 = True
+                    stop_gen2 = True
                     break
                 elif input_string1 is None:  # and input_string2 is not.
+                    stop_gen1 = True
                     yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
                 elif input_string2 is None:  # and input_string2 is not.
+                    stop_gen2 = True
                     yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
                 else:  # randomly choose between the two...
                     if random.random() > 0.5:  # yeild middle difficulty.
                         yield input_string1, input_id1, label1, aux_tok_11, aux_tok_21
                     else:  # yield high dificulty.
                         yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
-
+            '''
         elif self.type == "RACE_combined_test": # TODO update test to handle generation and testing mode...
             assert "RACE_middle_test" in self.dataLoaders.keys() and "RACE_high_test" in self.dataLoaders.keys(), f"One of RACE_middle_test and/or RACE_high_test is not in the dataLoaders dictionary of dataloaders!"
             gen1 = self.dataLoaders["RACE_middle_test"](mode="default")
-            gen2 = self.dataLoaders["RACE_high_test"](mode="default")
+            gen2 = self.dataLoaders["RACE_high_test"](mode="default") # TODO change mode to test and change the rest accordingly!
+            stop_gen1 = False
+            stop_gen2 = False
             while True:
-                input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = next(gen1)
-                input_string2, input_id2, label2, aux_tok_12, aux_tok_22 = next(gen2)
+
+                input_string, input_id, label, aux_tok_1, aux_tok_2 = None, None, None, None, None
+                curr_gen = ''
+                stop_all = True
+                if random.random() > 0.5:
+                    if not stop_gen1:  # do gen1 first.
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen1)
+                        curr_gen = "gen1"
+                        stop_all = False
+                    elif not stop_gen2:  # do gen2 if gen1 is finished.
+                        curr_gen = "gen2"
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen2)
+                        stop_all = False
+                else:
+                    if not stop_gen2:  # do gen2 first.
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen2)
+                        curr_gen = "gen2"
+                        stop_all = False
+                    elif not stop_gen1:  # do gen2 if gen1 is finished.
+                        input_string, input_id, label, aux_tok_1, aux_tok_2 = next(gen1)
+                        curr_gen = "gen1"
+                        stop_all = False
+
+                if stop_all:
+                    yield input_string, input_id, label, aux_tok_1, aux_tok_2  # will be all None
+                    break
+                if input_string is None and curr_gen == "gen1":  # gen1 is finished, so don't output None and continue, also set stop_gen1 to True so we don't process it again.
+                    stop_gen1 = True
+                    continue
+                if input_string is None and curr_gen == "gen2":
+                    stop_gen2 = True
+                    continue
+
+                yield input_string, input_id, label, aux_tok_1, aux_tok_2
+
+            '''
+            while True:
+
+                if not stop_gen1:  # stop_gen1 is False.
+                    input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = next(gen1)
+                else:  # stop_gen1 is True
+                    input_string1, input_id1, label1, aux_tok_11, aux_tok_21 = None, None, None, None, None
+                if not stop_gen2:  # stop_gen2 is False
+                    input_string2, input_id2, label2, aux_tok_12, aux_tok_22 = next(gen2)
+                else:  # stop_gen2 is True
+                    input_string2, input_id2, label2, aux_tok_12, aux_tok_22 = None, None, None, None, None
+
                 if input_string1 is None and input_string2 is None:
                     yield None, None, None, None, None
+                    stop_gen1 = True
+                    stop_gen2 = True
                     break
                 elif input_string1 is None:  # and input_string2 is not.
+                    stop_gen1 = True
                     yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
                 elif input_string2 is None:  # and input_string2 is not.
+                    stop_gen2 = True
                     yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
                 else:  # randomly choose between the two...
                     if random.random() > 0.5:  # yeild middle difficulty.
                         yield input_string1, input_id1, label1, aux_tok_11, aux_tok_21
                     else:  # yield high dificulty.
                         yield input_string2, input_id2, label2, aux_tok_12, aux_tok_22
+            '''
 
     def load_race(self):
 
         mini_generator = None
-        if self.type in ["RACE_middle_train", "RACE_middle_val", "RACE_high_train", "RACE_high_val",
-                         "RACE_middle_test", "RACE_high_test"]: # TODO update test to handle generation and testing mode...
+        mode_ = "default"
+        if self.type in ["RACE_middle_train", "RACE_middle_val", "RACE_high_train", "RACE_high_val"]:
             mini_generator = self.dataLoaders[self.type](mode="default")
-        else:
-            mini_generator = self._combined_helper()
+        elif self.type in ["RACE_middle_test", "RACE_high_test"]:
+            mini_generator = self.dataLoaders[self.type](mode="test")
+            mode_ = "test"
+        else: mini_generator = self._combined_helper()
 
-        while True:
-            input_string, input_id, label, aux_tok_1, aux_tok_2 = next(mini_generator) # label will be a list of one element, the correct answer...
-            if input_string is None or input_id is None: break
+        if mode_ == "default":
+            while True:
+                break_ = False
+                try: # bad fix...
+                    input_string, input_id, label, aux_tok_1, aux_tok_2 = next(mini_generator) # label will be a list of one element, the correct answer...
+                except RuntimeError as e: # stopIteration
+                    print(f"Runtime Error: {e} \n Continuing as per normal as generator has nothing left to generate!")
+                    break_ = True
+                except:
+                    print("Unknown error with generator, continuing!")
+                    break_ = True
 
-            pad_tok_id = self.tokenizer.encode_single(self.pad_tok)[0]
-            if self.pad_to_max_length:
-                input_string = input_string + [self.pad_tok for _ in range(self.seq_len - len(input_string))]
-                input_id = input_id + [pad_tok_id for _ in range(self.seq_len - len(input_id))]
-                label = label + [pad_tok_id for _ in range(self.seq_len - len(label))]
-            #print(f"length of input_string: {len(input_string)} \n"
-            #      f"length of input_id: {len(input_id)} \n"
-            #      f"length of label: {len(label)}")
+                if break_: break
+                if input_string is None or input_id is None: break
 
-            null_tok = self.tokenizer.encode_single(self.null_tok)[0]
-            nm_input_id = [aux_tok_1, aux_tok_2] + \
-                          [null_tok for _ in range(self.num_reading_strategies)] + \
-                          input_id  # input_id will be a list.
+                pad_tok_id = self.tokenizer.encode_single(self.pad_tok)[0]
+                #end_tok_id = self.tokenizer.encode_single(self.end_tok)[0] # #TODO check both the pad and encoder tokens performance while training and on eval
+                if self.pad_to_max_length: # changed pad_tok and pad_tok_id to end_tok version to test if it remedys the issue. (no <\s> output during generation so can't stop)
+                    input_string = input_string + [self.pad_tok for _ in range(self.seq_len - len(input_string))]
+                    input_id = input_id + [pad_tok_id for _ in range(self.seq_len - len(input_id))]
+                    label = label + [pad_tok_id for _ in range(self.seq_len - len(label))] #
+                #print(f"length of input_string: {len(input_string)} \n"
+                #      f"length of input_id: {len(input_id)} \n"
+                #      f"length of label: {len(label)}")
 
-            input_string = tf.cast(tf.convert_to_tensor(np.asarray(input_string)), dtype=tf.dtypes.string)
-            input_id = tf.cast(tf.convert_to_tensor(np.asarray(input_id)), dtype=tf.dtypes.int64)
-            label_id = tf.cast(tf.convert_to_tensor(np.asarray(label)), dtype=tf.dtypes.int64)
-            nm_input_id = tf.cast(tf.convert_to_tensor(np.asarray(nm_input_id)), dtype=tf.dtypes.int64)
+                null_tok = self.tokenizer.encode_single(self.null_tok)[0]
+                nm_input_id = [aux_tok_1, aux_tok_2] + \
+                              [null_tok for _ in range(self.num_reading_strategies)] + \
+                              input_id  # input_id will be a list.
 
-            yield input_string, input_id, label_id, nm_input_id
+                input_string = tf.cast(tf.convert_to_tensor(np.asarray(input_string)), dtype=tf.dtypes.string)
+                input_id = tf.cast(tf.convert_to_tensor(np.asarray(input_id)), dtype=tf.dtypes.int64)
+                label_id = tf.cast(tf.convert_to_tensor(np.asarray(label)), dtype=tf.dtypes.int64)
+                nm_input_id = tf.cast(tf.convert_to_tensor(np.asarray(nm_input_id)), dtype=tf.dtypes.int64)
+
+                yield input_string, input_id, label_id, nm_input_id
+        elif mode_ == "test":
+            while True:
+                break_ = False
+                try:  # bad fix...
+                    input_string, input_id, all_labels, correct_ao, aux_tok_1, aux_tok_2 = next(mini_generator)  # label will be a list of one element, the correct answer...
+                except RuntimeError as e:  # stopIteration
+                    print(f"Runtime Error: {e} \n Continuing as per normal as generator has nothing left to generate!")
+                    break_ = True
+                except:
+                    print("Unknown error with generator, continuing!")
+                    break_ = True
+
+                if break_: break
+                if input_string is None or input_id is None: break
+
+                pad_tok_id = self.tokenizer.encode_single(self.pad_tok)[0]
+                if self.pad_to_max_length:
+                    input_string = input_string + [self.pad_tok for _ in range(self.seq_len - len(input_string))]
+                    input_id = input_id + [pad_tok_id for _ in range(self.seq_len - len(input_id))]
+                    #label = label + [pad_tok_id for _ in range(self.seq_len - len(label))]
+                # print(f"length of input_string: {len(input_string)} \n"
+                #      f"length of input_id: {len(input_id)} \n"
+                #      f"length of label: {len(label)}")
+
+                null_tok = self.tokenizer.encode_single(self.null_tok)[0]
+                nm_input_id = [aux_tok_1, aux_tok_2] + \
+                              [null_tok for _ in range(self.num_reading_strategies)] + \
+                              input_id  # input_id will be a list.
+
+                input_string = tf.cast(tf.convert_to_tensor(np.asarray(input_string)), dtype=tf.dtypes.string)
+                input_id = tf.cast(tf.convert_to_tensor(np.asarray(input_id)), dtype=tf.dtypes.int64)
+                #label_id = tf.cast(tf.convert_to_tensor(np.asarray(label)), dtype=tf.dtypes.int64)
+                all_labels = tf.cast(tf.convert_to_tensor(np.asarray(all_labels)), dtype=tf.dtypes.string)
+                correct_ao = tf.cast(tf.convert_to_tensor(np.asarray(correct_ao)), dtype=tf.dtypes.string)
+                nm_input_id = tf.cast(tf.convert_to_tensor(np.asarray(nm_input_id)), dtype=tf.dtypes.int64)
+
+                yield input_string, input_id, all_labels, correct_ao, nm_input_id
 
     def get_generator(self, type: str, shuffle: bool):
         self.shuffle = shuffle
@@ -469,17 +674,19 @@ class MasterDataLoaderTF(object):
                                                                      tf.dtypes.int64,
                                                                      tf.dtypes.int64))
 
-        elif type == "RACE_medium_test":
+        elif type == "RACE_middle_test":
             generator = tf.data.Dataset.from_generator(self.load_race,
                                                        output_types=(tf.dtypes.string,
                                                                      tf.dtypes.int64,
-                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.string,
+                                                                     tf.dtypes.string,
                                                                      tf.dtypes.int64))
         elif type == "RACE_high_test":
             generator = tf.data.Dataset.from_generator(self.load_race,
                                                        output_types=(tf.dtypes.string,
                                                                      tf.dtypes.int64,
-                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.string,
+                                                                     tf.dtypes.string,
                                                                      tf.dtypes.int64))
 
         elif type == "RACE_combined_train":

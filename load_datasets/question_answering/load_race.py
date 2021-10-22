@@ -597,6 +597,7 @@ class RACEDataLoader:
         self.passage_questions = [ques for ques in data['questions']] # will be a list of strings...
 
     def __call__(self, mode: str):
+        random.shuffle(self.filenames) # randomly shuffle the list each epoch.
         if mode == "default":
             for item in self.filenames:
                 self.process_file(self.filepath+item)
@@ -638,7 +639,8 @@ class RACEDataLoader:
                             if self.a9 == label: correct_ao = answer_option
                         else: raise Exception(f"Too many answer options than what is supported (more than 9)")
                     input_ += " " + self.end_tok
-                    correct_label = answer_option + " " + self.end_tok
+                    #correct_label = answer_option + " " + self.end_tok
+                    correct_label = correct_ao + " " + self.end_tok
                     #input_label = input_ + " " + correct_label
 
                     data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(input_, max_seq_len=10000000) # [0] is ids [1] is string version...
@@ -663,7 +665,74 @@ class RACEDataLoader:
                     #print(f"input_id: {input_id} \n label_: {label_} \n")
 
                     yield input_string, input_id, label_, self.dec_tok_id, self.pmqa_tok_id
-        yield None, None, None, None, None
+            yield None, None, None, None, None
+        if mode == "test":
+            for item in self.filenames:
+                self.process_file(self.filepath+item)
+
+                for i, label in enumerate(self.answer_char):
+
+                    input_ = ''
+                    passage = self.race_passage
+                    input_ += " " + self.p1 + " " + passage
+                    input_ += " " + self.question + " " + self.passage_questions[i]
+                    correct_ao = ''
+                    all_labels = ''
+                    #cor_label = None
+                    for j, answer_option in enumerate(self.answer_options[i]):
+                        if j == 0:
+                            input_ += " " + self.a1 + " " + answer_option
+                            all_labels += " " + self.a1 + " " + answer_option
+                            if self.a1 == label: correct_ao = answer_option
+                        elif j == 1:
+                            input_ += " " + self.a2 + " " + answer_option
+                            all_labels += " " + self.a2 + " " + answer_option
+                            if self.a2 == label: correct_ao = answer_option
+                        elif j == 2:
+                            input_ += " " + self.a3 + " " + answer_option
+                            all_labels += " " + self.a3 + " " + answer_option
+                            if self.a3 == label: correct_ao = answer_option
+                        elif j == 3:
+                            input_ += " " + self.a4 + " " + answer_option
+                            all_labels += " " + self.a4 + " " + answer_option
+                            if self.a4 == label: correct_ao = answer_option
+                        elif j == 4:
+                            input_ += " " + self.a5 + " " + answer_option
+                            all_labels += " " + self.a5 + " " + answer_option
+                            if self.a5 == label: correct_ao = answer_option
+                        elif j == 5:
+                            input_ += " " + self.a6 + " " + answer_option
+                            all_labels += " " + self.a6 + " " + answer_option
+                            if self.a6 == label: correct_ao = answer_option
+                        elif j == 6:
+                            input_ += " " + self.a7 + " " + answer_option
+                            all_labels += " " + self.a7 + " " + answer_option
+                            if self.a7 == label: correct_ao = answer_option
+                        elif j == 7:
+                            input_ += " " + self.a8 + " " + answer_option
+                            all_labels += " " + self.a8 + " " + answer_option
+                            if self.a8 == label: correct_ao = answer_option
+                        elif j == 8:
+                            input_ += " " + self.a9 + " " + answer_option
+                            all_labels += " " + self.a9 + " " + answer_option
+                            if self.a9 == label: correct_ao = answer_option
+                        else: raise Exception(f"Too many answer options than what is supported (more than 9)")
+                    input_ += " " + self.end_tok
+
+                    data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(input_, max_seq_len=10000000) # [0] is ids [1] is string version...
+
+                    if len(data_id_string[1]) > self.seq_len: # handles if there is overflow. compress some of the passage.
+                        #note: if >= above, then case when they are equal causes the first element to be doubled twice...
+                        #> is ok as the first element will never be reached, hence ok to add back in as done below.
+                        input_string = [data_id_string[1][0]] + (data_id_string[1])[-(self.seq_len-1):] # if overflow then remove parts of the passage
+                    else: input_string = data_id_string[1]
+
+                    if len(data_id_string[0]) > self.seq_len: # handles overflow.
+                        input_id = [data_id_string[0][0]] + (data_id_string[0])[-(self.seq_len-1):]  # if overflow then remove parts of the passage
+                    else: input_id = data_id_string[0]
+
+                    yield input_string, input_id, all_labels, label, self.dec_tok_id, self.pmqa_tok_id
+            yield None, None, None, None, None, None
 
 
 if __name__ == "__main__":

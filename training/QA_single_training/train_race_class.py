@@ -12,6 +12,7 @@ sys.path.append("..")
 
 import tensorflow as tf
 import numpy as np
+import re
 
 from training.parent_train import *
 
@@ -371,52 +372,217 @@ class NMTransformerEncDecTrain(ParentTrainNL):
         # input should be (input_string(no correct ans), input_id(no correct ans), ans_options, correct_answer, )
         start = time.time()
 
-        epoch_loss_total = 0  # sum up all of the losses
-        epoch_size_total = 0  # then divide by the total number of losses.
-        correct_samples = 0
-        total_samples = 0
+        correct_samples = 0 # get the number of correct answers to questions.
+        total_samples = 0 # the total number of correct questions.
         for (inp_str, inp_id, all_labels, cor_label, nm_inp_id) in data: # note: in all labels
             #loss, size = self._distributed_val_step(inp_id, label, nm_inp_id, num_aux_tokens)
-            loss, size, correct, total = self._distributed_test_step(inp_str, inp_id, all_labels, cor_label, nm_inp_id) # TODO
-            epoch_loss_total += loss
-            epoch_size_total += size
+            correct, total = self._distributed_test_step(inp_str, inp_id, all_labels, cor_label, nm_inp_id, num_aux_tokens, max_generate_len)
             correct_samples += correct
             total_samples += total
 
-        total_loss = epoch_loss_total / epoch_size_total  # this is the loss of all words divided by the number of words (while eliminating the effect of the padding tokens)
         total_accuracy = correct_samples / total_samples
-        print(f'Test Loss {total_loss:.4f} Test Accuracy {total_accuracy} correct: {correct_samples} total: {total_samples}')
+        print(f'Test Accuracy {total_accuracy} correct: {correct_samples} total: {total_samples}')
         print(f'Time taken: {time.time() - start:.2f} secs\n')
 
         header = True if e == 0 else False
-        self._save_epoch_results_nm("test", e+1, save_filepath, header, total_loss, total_accuracy)
+        self._save_epoch_results_nm("test", e+1, save_filepath, header, None, total_accuracy)
 
-    @tf.function
-    def _distributed_test_step(self, inp_str, inp_id, all_labels, cor_label, nm_inp_id):
+    def _distributed_test_step(self, inp_str, inp_id, all_labels, cor_label, nm_inp_id, num_aux_tokens, max_generate_len):
         if self.strategy is not None:
-            loss, size, correct, total = self.strategy.run(self.test_step, args=(inp_str, inp_id, all_labels, cor_label, nm_inp_id,))
+            correct, total = self.strategy.run(self.test_step, args=(inp_str, inp_id, all_labels, cor_label,
+                                                                     nm_inp_id, num_aux_tokens, max_generate_len,))
 
             # The if else may be totally irrelevant.
             if self.strategy.num_replicas_in_sync > 1:
-                loss = tf.reduce_sum(loss.values)
-                size = tf.reduce_sum(size.values)
+                #loss = tf.reduce_sum(loss.values)
+                #size = tf.reduce_sum(size.values)
                 correct = tf.reduce_sum(correct.values)
                 total = tf.reduce_sum(total.values)
             else:
-                loss = tf.reduce_sum(loss)
-                size = tf.reduce_sum(size)
+                #loss = tf.reduce_sum(loss)
+                #size = tf.reduce_sum(size)
                 correct = tf.reduce_sum(correct)
                 total = tf.reduce_sum(total)
         else:
-            loss, size, correct, total = self.test_step(inp_str, inp_id, all_labels, cor_label, nm_inp_id)
+            correct, total = self.test_step(inp_str, inp_id, all_labels, cor_label, nm_inp_id, num_aux_tokens, max_generate_len)
 
-        return loss, size, correct, total
+        return correct, total
 
-    def test_step(self): # todo
-        pass
+    def test_step(self, inp_str, inp_id, all_labels, cor_label, nm_inp_id, num_aux_tokens, max_generate_len):
+        mode_list = list()  # holds which mode each batch item is in.
+        nm_mask = None
+        dec_mask = None
+        for b in range(nm_inp_id.shape[0]):  # iterate through each batch.
+            if nm_inp_id[b, 0] == self.dec_tok_id and num_aux_tokens > 0:
+                nm_mask_ = create_combined_mask(tf.expand_dims(nm_inp_id[b, :], axis=0), self.padding_id,
+                                                num_aux_tokens)  # [batch_size, 1, seq_len, seq_len]
+                dec_mask_ = create_combined_mask(tf.expand_dims(inp_id[b, :], axis=0), self.padding_id)
+                mode_list.append("dec")
+            elif nm_inp_id[b, 0] == self.enc_tok_id and num_aux_tokens > 0:
+                nm_mask_ = create_padding_mask(tf.expand_dims(nm_inp_id[b, :], axis=0),
+                                               self.padding_id)  # [batch, 1, 1, seq_len] TODO repeat dimension here...
+                nm_mask_ = tf.repeat(nm_mask_, [nm_mask_.shape[-1]], axis=2)  # [batch, 1, seq_len, seq_len]
+                dec_mask_ = create_padding_mask(tf.expand_dims(inp_id[b, :], axis=0), self.padding_id)
+                dec_mask_ = tf.repeat(dec_mask_, [dec_mask_.shape[-1]], axis=2)  # [batch, 1, seq_len, seq_len]
+                mode_list.append("enc")
+            elif num_aux_tokens <= 0:  # decoder masking by default.
+                nm_mask_ = create_combined_mask(tf.expand_dims(nm_inp_id[b, :], axis=0), self.padding_id,
+                                                num_aux_tokens)
+                dec_mask_ = create_combined_mask(tf.expand_dims(inp_id[b, :], axis=0), self.padding_id)
+                mode_list.append("dec")
+            else:
+                # raise Exception(f"Error: invalid value for auxiliary token at postion 0. \n It should represent one of the "
+                #                 f"encoder or decoder tokens but doesn't!")
+                nm_mask_ = tf.ones(
+                    (nm_inp_id.shape[0], 1, nm_inp_id.shape[1], nm_inp_id.shape[1]))  # pad everyting otherwise.
+                dec_mask_ = tf.ones((inp_id.shape[0], 1, inp_id.shape[1], inp_id.shape[1]))
+                mode_list.append("none")
+            if nm_mask is None:
+                nm_mask = nm_mask_
+            else:
+                nm_mask = tf.concat([nm_mask, nm_mask_], axis=0)
+            if dec_mask is None:
+                dec_mask = dec_mask_
+            else:
+                dec_mask = tf.concat([dec_mask, dec_mask_], axis=0)
 
-    def _accuracy_helper(self): # todo
-        pass
+        correct, total = 0, 0
+
+        generated_ids = self.model.generate_answer(inp_id, nm_inp_id, training=False, nm_mask=nm_mask, dec_mask=dec_mask,
+                                                   pad_tok_id=self.padding_id, end_tok_id=self.end_tok_id,
+                                                   gen_len_max=max_generate_len) # [[1,2,3,4], [324,54,54,6]]                                                                                    #  [3,45,6,7]]
+        #print(f"generated answers: {self.tokenizer.batch_decode(generated_ids)}")
+
+        convert_byte_to_string = lambda i: i.decode("utf-8")
+        all_labels = [convert_byte_to_string(x) for x in all_labels.numpy().tolist()] # list of strings.
+        #print(f"all labels: {all_labels}")
+        cor_label = [convert_byte_to_string(x) for x in cor_label.numpy().tolist()]  # list of strings.
+        #print(f"cor_label: {cor_label}")
+
+        cor, tot = self._accuracy_helper(all_labels, cor_label, generated_ids)
+        print(f"Batch accuracy: {cor/tot}")
+        correct += cor
+        total += tot
+
+        # return loss_enc, size_enc, loss_dec, size_dec
+        return correct, total
+
+    def _intersection_ids_counter(self, all_labels, answer):
+        # note: this should work for both strings and integers.
+        #all_labels = [[], [], []] # note: that order should be preserved.
+        #answer = []
+        answer_unique = set(answer)
+        all_labels_unique = []
+        for lst in all_labels: all_labels_unique.append(set(lst))
+
+        label_scores = []
+        for set_ in all_labels_unique:
+
+            total_unique_union = set_.union(answer_unique)
+            total_intersection = set_.intersection(answer_unique)
+
+            label_scores.append(len(total_intersection)/len(total_unique_union))
+
+        max_score = max(label_scores)
+        max_indices = [i for i, j in enumerate(label_scores) if j == max_score]
+
+        # note: bias towards first elment in list instead of random for consistency if a tie.
+        return max_indices[0] + 1 # returns an integer from 1 to len(all_labels) inclusive.
+
+    def _intersection_size_only(self, all_labels, answer):
+        answer_unique = set(answer)
+        all_labels_unique = []
+        for lst in all_labels: all_labels_unique.append(set(lst))
+
+        label_scores = []
+        for set_ in all_labels_unique:
+            total_intersection = set_.intersection(answer_unique)
+            label_scores.append(len(total_intersection))
+
+        max_score = max(label_scores)
+        max_indices = [i for i, j in enumerate(label_scores) if j == max_score]
+
+        # note: bias towards first elment in list instead of random for consistency if a tie.
+        return max_indices[0] + 1  # returns an integer from 1 to len(all_labels) inclusive.
+
+    def _accuracy_helper(self, all_labels, cor_label, generated_ids): #TODO
+        #all_labels and cor_label are list of strings.
+        #all_labels
+        # generated_ids is a list of integers.
+        correct = 0
+        total = 0
+
+        all_labels_split = []
+        for batch_item in all_labels:
+            temp_list = re.split(r"\(\d\)", batch_item) # batch item will be a string.
+            for i in range(len(temp_list)-1,-1,-1):
+                if temp_list[i].strip() == "":
+                    temp_list.pop(i)
+                else: temp_list[i] = temp_list[i].strip()
+            #print(f"temp_list: {temp_list}")
+            all_labels_split.append(temp_list)
+
+        for i, batch_item in enumerate(all_labels_split): # batch_item will be a list of strings, each representing one answer option.
+            temp1 = self.tokenizer.batch_encode(batch_item)["input_ids"] # answer options. list of
+            #print(f"cor_label \n {cor_label}")
+            #temp2 = self.tokenizer.encode_single(cor_label[i]) # answer list of integers (in this case one integer).
+            #assert len(temp2) == 1, f"There are more than 1 id in the list. There should only be one! \n This means" \
+            #                        f" that the single item is not in the tokenizer's vocabulary or it is more than 1 " \
+            #                        f"element to begin with!"
+            #indice = self._intersection_ids_counter(temp1, temp2)
+            #indice = self._intersection_size_only(temp1, temp2)
+            #indice = self._intersection_size_only(temp1, generated_ids[i])
+            indice = self._intersection_ids_counter(temp1, generated_ids[i])
+
+            cor, tot = self._check_correct_helper(indice, cor_label[i])
+            correct += cor
+            total += tot
+        return correct, total
+
+    def _check_correct_helper(self, indice, answer):
+        #indice will represent the answer position -- i.e. 1 means A, 2 means B, ...
+        #answer will be in string format.
+        correct = 0
+        total = 0
+        if indice == 1:
+            if answer.strip() == "(1)":
+                correct += 1
+            total += 1
+        elif indice == 2:
+            if answer.strip() == "(2)":
+                correct += 1
+            total += 1
+        elif indice == 3:
+            if answer.strip() == "(3)":
+                correct += 1
+            total += 1
+        elif indice == 4:
+            if answer.strip() == "(4)":
+                correct += 1
+            total += 1
+        elif indice == 5:
+            if answer.strip() == "(5)":
+                correct += 1
+            total += 1
+        elif indice == 6:
+            if answer.strip() == "(6)":
+                correct += 1
+            total += 1
+        elif indice == 7:
+            if answer.strip() == "(7)":
+                correct += 1
+            total += 1
+        elif indice == 8:
+            if answer.strip() == "(8)":
+                correct += 1
+            total += 1
+        elif indice == 9:
+            if answer.strip() == "(9)":
+                correct += 1
+            total += 1
+        else: raise Exception(f"Invalid index value: {indice}!")
+        return correct, total
+
 
 
 # TODO loss function for decoder (language modelling only)

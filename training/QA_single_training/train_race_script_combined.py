@@ -1,8 +1,8 @@
 import os
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "5,6"
-GPUS_AVAILABLE = 2
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,4,5"
+GPUS_AVAILABLE = 3
 
 import sys
 
@@ -53,7 +53,8 @@ if __name__ == "__main__":
     max_position_encoding_nm = config.max_position_encoding_nm
 
     loss_object = config.loss_object
-    learning_rate = config.learning_rate
+    #learning_rate = config.learning_rate
+    learning_rate = 0.00001
 
     # learning_rate = 0.0001
     transformer = None
@@ -126,16 +127,16 @@ if __name__ == "__main__":
     print(f'encoder {config.tokenizer.encode_single("<enc>")[0]}')
 
     train_class = NMTransformerEncDecTrain(transformer, optimizer, config.loss_object, pad_loss_function, config.tokenizer,
-                                     checkpoint_path_recent="/home/kkno604/Documents/Final_model_pretraining/Checkpoints/RACE_hard_train_from_middle/",
+                                     checkpoint_path_recent="/home/kkno604/Documents/Final_model_pretraining/Checkpoints/RACE_train_both_scratch2/",
                                      checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
                                      recent_to_keep=10, load_recent=False, best_to_keep=5, load_best=False,
-                                     load_specific_path="/home/kkno604/Documents/Final_model_pretraining/Checkpoints/pretraining_c4_notable/ckpt-440",
+                                     load_specific_path="/home/kkno604/Documents/Final_model_pretraining/Checkpoints/RACE_train_both_scratch2/ckpt-444",
                                      enc_tok_id=config.tokenizer.encode_single("<enc>")[0],
                                      dec_tok_id=config.tokenizer.encode_single("<dec>")[0],
                                      end_tok_id=config.tokenizer.encode_single("</s>")[0])
-    train_class.train_iteration(epoch_start=0, epoch_end=5, iteration_counter=0,
-                                save_filepath_train="/home/kkno604/Documents/Final_model_pretraining/Results/RACE_hard_train_from_middle/",
-                                save_filepath_val="/home/kkno604/Documents/Final_model_pretraining/Results/RACE_hard_train_from_middle/",
+    train_class.train_iteration(epoch_start=4, epoch_end=5, iteration_counter=44702,
+                                save_filepath_train="/home/kkno604/Documents/Final_model_pretraining/Results/RACE_train_both_scratch2/",
+                                save_filepath_val="/home/kkno604/Documents/Final_model_pretraining/Results/RACE_train_both_scratch2/",
                                 data_dict=data_dict, num_aux_tokens=config.num_aux_tokens, save_end_epoch=True,
-                                print_every_iterations=10, save_every_iterations=1000000) # 1 million b/c it will only save at the end of each epoch...
+                                print_every_iterations=25, save_every_iterations=1000000) # 1 million b/c it will only save at the end of each epoch...
 

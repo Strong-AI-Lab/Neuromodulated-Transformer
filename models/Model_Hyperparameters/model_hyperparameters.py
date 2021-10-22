@@ -187,7 +187,8 @@ class FinalModelSmall:
                                                                          reduction='none')
         #self.learning_rate = tf.keras.optimizers.schedules.CosineDecay(0.001, decay_steps=5000000)
         #self.learning_rate = tf.keras.optimizers.schedules.CosineDecay(0.0001, decay_steps=1000000)
-        self.learning_rate = 0.0001
+        self.learning_rate = tf.keras.optimizers.schedules.CosineDecay(0.001, decay_steps=5000000)
+        #self.learning_rate = 0.0001
 
         self.rel_pos_emb = True
         self.max_position_encoding_dec = self.max_seq_len_dec
