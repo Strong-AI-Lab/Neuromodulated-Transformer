@@ -39,7 +39,8 @@ class DecoderLayer(tf.keras.layers.Layer):
             and layer normalization.
     '''
 
-    def __init__(self, d_model, num_heads, num_layers_gating, dff, max_seq_len, rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True):
+    def __init__(self, d_model, num_heads, num_layers_gating, dff, max_seq_len, rate=0.1,
+                 nm_attn=False, nm_eol=False, rel_pos_emb=True, stop_nm_gradient=True):
         '''
         Function: __init__ \n
         Description: Initializes a decoder layer with the passed parameters. \n
@@ -61,6 +62,7 @@ class DecoderLayer(tf.keras.layers.Layer):
         self.max_seq_len = max_seq_len
         self.nm_attn = nm_attn
         self.nm_eol = nm_eol
+        self.stop_nm_gradient = stop_nm_gradient
 
         self.rel_pos_emb = rel_pos_emb
 
@@ -115,14 +117,18 @@ class DecoderLayer(tf.keras.layers.Layer):
 
         nm_attn_mini_tf = None
         if self.nm_attn:
-            nm_attn_mini_tf = nm_encoder_input[:,-x.shape[1]:,:] # with above input checks this
-            for m, layer in enumerate(self.attn_mini_tf):
+            if self.stop_nm_gradient:
+                nm_attn_mini_tf = tf.stop_gradient(nm_encoder_input[:,-x.shape[1]:,:])
+            else: nm_attn_mini_tf = nm_encoder_input[:,-x.shape[1]:,:]
+            for m, layer in enumerate(self.attn_mini_tf): # normally this is just two mini layers.
                 nm_attn_mini_tf, attn_nm_attn = layer(nm_attn_mini_tf, training, mask) # it shares the same mask (e.g. if look ahead mask then it is applied to both)
                 attention_weights[f"attn_nm_attn_layer_{str(m)}"] = attn_nm_attn
 
         nm_eol_mini_tf = None
         if self.nm_eol:
-            nm_eol_mini_tf = nm_encoder_input[:, -x.shape[1]:, :]  # with above input checks this
+            if self.stop_nm_gradient:
+                nm_eol_mini_tf = tf.stop_gradient(nm_encoder_input[:, -x.shape[1]:, :])  # with above input checks this
+            else: nm_eol_mini_tf = nm_encoder_input[:, -x.shape[1]:, :]
             for m, layer in enumerate(self.eol_mini_tf):
                 nm_eol_mini_tf, attn_nm_eol = layer(nm_eol_mini_tf, training, mask)  # it shares the same mask (e.g. if look ahead mask then it is applied to both)
                 attention_weights[f"attn_nm_eol_layer_{str(m)}"] = attn_nm_eol
@@ -139,8 +145,23 @@ class DecoderLayer(tf.keras.layers.Layer):
         out2 = out1 + out2
 
         if nm_eol_mini_tf is not None:
-            nm_eol_mini_tf = tf.math.sigmoid(nm_eol_mini_tf)
+            nm_eol_mini_tf = tf.math.sigmoid(nm_eol_mini_tf) # (batch_size, seq_len, d_mod)
             out2 = nm_eol_mini_tf * out2
+            #numerator = 0
+            #denominator = 0
+            #for i in range(nm_eol_mini_tf.shape[0]):
+            #    for j in range(nm_eol_mini_tf.shape[1]):
+            #        for k in range(nm_eol_mini_tf.shape[2]):
+            #            if nm_eol_mini_tf[i,j,k] == 0: numerator +=1
+            #            denominator += 1
+            #numerator = tf.reduce_sum(tf.cast(tf.math.less_equal(nm_eol_mini_tf, 0.25), dtype=tf.dtypes.int64))
+            #denominator = nm_eol_mini_tf.shape[0] * nm_eol_mini_tf.shape[1] * nm_eol_mini_tf.shape[2]
+            #print(f"numerator:{numerator.numpy()}\n"
+            #      f"denominator:{denominator}")
+            #numerator = tf.reduce_sum(tf.cast(tf.math.less_equal(out2, 0.05), dtype=tf.dtypes.int64))
+            #denominator = out2.shape[0] * out2.shape[1] * out2.shape[2]
+            #print(f"numerator:{numerator.numpy()}\n"
+            #      f"denominator:{denominator}")
 
         return out2, attention_weights
 
@@ -163,7 +184,7 @@ class Decoder(tf.keras.layers.Layer):
     '''
 
     def __init__(self, num_layers, num_layers_gating, d_model, num_heads, dff, max_seq_len, target_vocab_size, max_position_encoding=10000,
-                 rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True, max_no_ans=9):
+                 rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True, max_no_ans=9, stop_grad_strat=0):
         '''
         Function: __init__ \n
         Description: Initialization of the decoder class. \n
@@ -209,13 +230,22 @@ class Decoder(tf.keras.layers.Layer):
         self.W_2 = tf.keras.layers.Dense(self.d_model, input_shape=(self.max_seq_len, (self.max_no_ans-1)*self.d_model))
         self.W_3 = tf.keras.layers.Dense(self.d_model, input_shape=(self.max_seq_len, self.d_model*2))
 
-        self.decoder_layers = [DecoderLayer(d_model, num_heads, num_layers_gating, dff, max_seq_len,
-                                            rate, nm_attn, nm_eol,
-                                            rel_pos_emb=rel_pos_emb) for _ in range(num_layers-1)] + \
-                              [DecoderLayer(d_model, num_heads, num_layers_gating, dff, max_seq_len,
-                                            rate, nm_attn, nm_eol,
-                                            rel_pos_emb=rel_pos_emb)] # the gradient should never be stopped here, only potentially in the first N-1 layers.
 
+        if stop_grad_strat == 0: # only the gradient at the last layer for the nm related path is allowed to be propagated back through.
+            self.decoder_layers = [DecoderLayer(d_model, num_heads, num_layers_gating, dff, max_seq_len,
+                                                rate, nm_attn, nm_eol,
+                                                rel_pos_emb=rel_pos_emb, stop_nm_gradient=True) for _ in range(num_layers-1)] + \
+                                  [DecoderLayer(d_model, num_heads, num_layers_gating, dff, max_seq_len,
+                                                rate, nm_attn, nm_eol,
+                                                rel_pos_emb=rel_pos_emb, stop_nm_gradient=False)] # the gradient should never be stopped here, only potentially in the first N-1 layers.
+        elif stop_grad_strat == 1: # no stopping the gradient flow at all.
+            self.decoder_layers = [DecoderLayer(d_model, num_heads, num_layers_gating, dff, max_seq_len,
+                                                rate, nm_attn, nm_eol,
+                                                rel_pos_emb=rel_pos_emb, stop_nm_gradient=False) for _ in range(num_layers)]
+        elif stop_grad_strat == 2: # stop all gradient from flowing back at all.
+            self.decoder_layers = [DecoderLayer(d_model, num_heads, num_layers_gating, dff, max_seq_len,
+                                                rate, nm_attn, nm_eol,
+                                                rel_pos_emb=rel_pos_emb, stop_nm_gradient=True) for _ in range(num_layers)]
         self.dropout = tf.keras.layers.Dropout(rate) 
 
     def call(self, x, training, mask, nm_encoder_input=None):

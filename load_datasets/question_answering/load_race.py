@@ -8,6 +8,7 @@ import json
 import re
 import sys
 import regex
+import copy
 
 sys.path.append("../..")
 
@@ -27,7 +28,7 @@ class RACEDataLoader:
                  pcoreference: str, bcoreference: str, psentiment: str, pgqa: str, psqa: str, gqa: str, pbqa: str,
                  placeholder: str, translation: str, hypothesis: str, question: str, metacognition: str,
                  unk_rs: str, aoint_rs: str, highlighting_rs: str, reread_rs: str, summarize_rs: str, paraphrase_rs: str,
-                 tokenizer=None):
+                 tokenizer=None, num_ans_options=5):
         '''
 
         '''
@@ -37,6 +38,8 @@ class RACEDataLoader:
         self.strategy = strategy # train, validation, test -- train and validation will be the same.
         assert self.strategy in ["train", "validation", "val", "test"], f"The strategy should be one of 'train', 'validation' " \
                                                                         f"'val' or 'test', got {self.strategy}!"
+
+        self.num_ans_options = num_ans_options
 
         self.enc_tok = enc_tok
         self.dec_tok = dec_tok
@@ -596,6 +599,11 @@ class RACEDataLoader:
         self.answer_options = [aos for aos in data['options']] # stores a list of lists, of which contain answer options for a given question.
         self.passage_questions = [ques for ques in data['questions']] # will be a list of strings...
 
+        #print(f"race_passage: \n{self.race_passage} \n\n"
+        #      f"answer_char: \n{self.answer_char} \n\n"
+        #      f"answer_options: \n{self.answer_options} \n\n"
+        #      f"passage_questions: \n{self.passage_questions}\n")
+
     def __call__(self, mode: str):
         random.shuffle(self.filenames) # randomly shuffle the list each epoch.
         if mode == "default":
@@ -646,27 +654,32 @@ class RACEDataLoader:
                     data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(input_, max_seq_len=10000000) # [0] is ids [1] is string version...
                     label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(correct_label, max_seq_len=1000000)
 
+                    overflow = False
                     if len(data_id_string[1]+label_data_id_string[1]) > self.seq_len: # handles if there is overflow. compress some of the passage.
                         #note: if >= above, then case when they are equal causes the first element to be doubled twice...
                         #> is ok as the first element will never be reached, hence ok to add back in as done below.
+                        overflow = True
                         input_string = [data_id_string[1][0]] + (data_id_string[1]+label_data_id_string[1])[-(self.seq_len-1):] # if overflow then remove parts of the passage
                     else: input_string = data_id_string[1]+label_data_id_string[1]
 
                     if len(data_id_string[0]+label_data_id_string[0]) > self.seq_len: # handles overflow.
+                        overflow = True
                         input_id = [data_id_string[0][0]] + (data_id_string[0]+label_data_id_string[0])[-(self.seq_len-1):]  # if overflow then remove parts of the passage
                     else: input_id = data_id_string[0]+label_data_id_string[0]
+                    print(f"Length of input_id: {len(input_id)}")
 
-                    label_ = [self.pad_tok_id for i in range(len(input_id)-len(label_data_id_string[0])-1)] + label_data_id_string[0] + [self.end_tok_id]
+                    label_ = [self.pad_tok_id for i in range(len(input_id)-len(label_data_id_string[0])-1)] + label_data_id_string[0] + [self.pad_tok_id]
                     #         [blah, blah, ..., </s> correct_ao_1, correct_ao_2, </s>]
                     # [<pad>, <pad>, ..., <pad>, correct_ao_1, correct_ao_2, </s>, <pad>]
                     assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
                                                          f"of the input id ({len(input_id)})"
                     #print(f"input_: {input_} \n correct_label: {correct_label} \n")
                     #print(f"input_id: {input_id} \n label_: {label_} \n")
-
+                    #if overflow: print("Overflow!")
+                    #print(f"input_string:\n {input_string}")
                     yield input_string, input_id, label_, self.dec_tok_id, self.pmqa_tok_id
             yield None, None, None, None, None
-        if mode == "test":
+        elif mode == "test":
             for item in self.filenames:
                 self.process_file(self.filepath+item)
 
@@ -733,6 +746,118 @@ class RACEDataLoader:
 
                     yield input_string, input_id, all_labels, label, self.dec_tok_id, self.pmqa_tok_id
             yield None, None, None, None, None, None
+        elif mode == "default_label":
+            for item in self.filenames:
+                self.process_file(self.filepath+item)
+
+                for i, label in enumerate(self.answer_char):
+
+                    input_ = self.cls_tok ## change here, start off with cls_token.
+                    passage = self.race_passage
+                    input_ += " " + self.p1 + " " + passage
+                    input_ += " " + self.question + " " + self.passage_questions[i] + " " + self.sep_tok
+                    input_ = [copy.copy(input_) for _ in range(self.num_ans_options)]
+                    correct_ao = ''
+
+                    label_ = []
+                    j = 0
+                    while True:
+                        if j >= self.num_ans_options: break
+                        if j < len(self.answer_options[i]):
+                            input_[j] += " " + self.answer_options[i][j] + self.end_tok
+                            #if self.answer_options[i][j] == label: label_.append(1)
+                            if self.a1 == label and j == 0: label_.append(1)
+                            elif self.a2 == label and j == 1: label_.append(1)
+                            elif self.a3 == label and j == 2: label_.append(1)
+                            elif self.a4 == label and j == 3: label_.append(1)
+                            elif self.a5 == label and j == 4: label_.append(1)
+                            elif self.a6 == label and j == 5: label_.append(1)
+                            elif self.a7 == label and j == 6: label_.append(1)
+                            elif self.a8 == label and j == 7: label_.append(1)
+                            elif self.a9 == label and j == 8: label_.append(1)
+                            else: label_.append(0)
+                        else:
+                            input_[j] = self.pad_tok # will be padded to max length later on in the process.
+                            label_.append(0)
+                        j += 1
+
+                    correct_label = label # eqivalent to above.
+
+                    input_string = []
+                    input_id = []
+
+                    for j in range(len(input_)):
+                        data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(input_[j], max_seq_len=10000000) # [0] is ids [1] is string version.
+
+                        if len(data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
+                            # note: if >= above, then case when they are equal causes the first element to be doubled twice...
+                            # > is ok as the first element will never be reached, hence ok to add back in as done below.
+                            input_string.append([data_id_string[1][0]] + (data_id_string[1])[-(self.seq_len-1):])  # if overflow then remove parts of the passage
+                        else:
+                            input_string.append(data_id_string[1])
+
+                        if len(data_id_string[0]) > self.seq_len:  # handles overflow.
+                            input_id.append([data_id_string[0][0]] + (data_id_string[0])[-(self.seq_len-1):])  # if overflow then remove parts of the passage
+                        else:
+                            input_id.append(data_id_string[0])
+
+                    #label_ = int(re.sub(r'[()]', '', label)) - 1 # hardcoded and not general if a1, ... is different.
+
+                    for k in range(len(input_string)):
+                        #print(f"input_string: {input_string}")
+                        yield input_string[k], input_id[k], label_[k], self.enc_tok_id, self.pmqa_tok_id, 3.0 if label_[k] == 1 else 1.0
+            yield None, None, None, None, None
+        elif mode == "test_label": # this is actuall unchanged from the original test mode.
+            for item in self.filenames:
+                self.process_file(self.filepath + item)
+
+                for i, label in enumerate(self.answer_char):
+
+                    input_ = self.cls_tok  ## change here, start off with cls_token.
+                    passage = self.race_passage
+                    input_ += " " + self.p1 + " " + passage
+                    input_ += " " + self.question + " " + self.passage_questions[i] + " " + self.sep_tok
+                    input_ = [copy.copy(input_) for _ in range(self.num_ans_options)]
+                    correct_ao = ''
+
+                    #label_ = []
+                    j = 0
+                    while True:
+                        if j >= self.num_ans_options: break
+                        if j < len(self.answer_options[i]):
+                            input_[j] += " " + self.answer_options[i][j] + self.end_tok
+                        else:
+                            input_[j] = self.pad_tok  # will be padded to max length later on in the process.
+                        j += 1
+
+                    correct_label = label  # eqivalent to above.
+
+                    input_string = []
+                    input_id = []
+
+                    for j in range(len(input_)):
+                        data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(input_[j],
+                                                                                            max_seq_len=10000000)  # [0] is ids [1] is string version.
+
+                        if len(data_id_string[
+                                   1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
+                            # note: if >= above, then case when they are equal causes the first element to be doubled twice...
+                            # > is ok as the first element will never be reached, hence ok to add back in as done below.
+                            input_string.append([data_id_string[1][0]] + (data_id_string[1])[-(
+                                        self.seq_len - 1):])  # if overflow then remove parts of the passage
+                        else:
+                            input_string.append(data_id_string[1])
+
+                        if len(data_id_string[0]) > self.seq_len:  # handles overflow.
+                            input_id.append([data_id_string[0][0]] + (data_id_string[0])[-(
+                                        self.seq_len - 1):])  # if overflow then remove parts of the passage
+                        else:
+                            input_id.append(data_id_string[0])
+
+                    label_ = int(re.sub(r'[()]', '', label)) - 1 # hardcoded and not general if a1, ... is different.
+
+                    yield input_string, input_id, label_, self.enc_tok_id, self.pmqa_tok_id  # label[k] will be an integer.
+            yield None, None, None, None, None
 
 
 if __name__ == "__main__":
@@ -740,3 +865,59 @@ if __name__ == "__main__":
     with open("/large_data/RACE/train/middle/2.txt", "r") as f:
         data = json.load(f)
     print(f"data: {data}")
+
+    '''
+    "options": [
+        [
+            "drinking some hot soup ; medicine",
+            "drinking some porridge ; breakfast",
+            "drinking some water ; medicine",
+            "drinking some soft drinks ; medicine"
+        ],
+        [
+            "drinking some water after getting up in the morning",
+            "drinking some water before going to bed",
+            "drinking some soft drinks after getting up",
+            "drinking some milk before going to bed"
+        ],
+        [
+            "oil",
+            "food",
+            "wastes",
+            "fat"
+        ],
+        [
+            "about eight o'clock in the morning",
+            "about eight o'clock in the evening",
+            "before supper",
+            "at night"
+        ],
+        [
+            "drink clean water",
+            "do n't drink the boiled water",
+            "the use of water",
+            "scientific water drinking"
+        ]
+    '''
+
+
+    def _get_accuracy(self, predictions, label):
+        '''
+        Function: get_accuracy \n
+        Description: Helper function that gets the accuracy of the predictions with the corrects labels. \n
+        Input:
+            predictions: (tf.Tensor; [batch_size, num_answer_options]
+            label: (tf.Tensor; [batch_size, (max_)seq_len]
+        Return:
+            correct: (int) The total number of correct predictions. \n
+            total: (int) The total number of samples a prediction is made for.
+        '''
+        pred = tf.argmax(predictions, axis=1) # (batch_size)
+        #print(f"pred_shape: {pred.shape}")
+        #total = predictions.shape[0]
+        correct = 0
+        total = 0
+        for i in range(pred.shape[0]):
+            if pred[i] == label[i]: correct += 1
+            total += 1
+        return correct, total

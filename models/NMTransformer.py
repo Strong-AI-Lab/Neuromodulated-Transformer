@@ -33,7 +33,7 @@ class NMTransformer(tf.keras.Model):
 
     def __init__(self, num_layers_dec, num_layers_nm, num_layers_gating, d_model, num_heads, dff, max_seq_len_dec, max_seq_len_nm,
                  target_vocab_size, nm_vocab_size, max_position_encoding_dec=10000, max_position_encoding_nm=10000,
-                 rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True, parallel_layers={}):
+                 rate=0.1, nm_attn=False, nm_eol=False, rel_pos_emb=True, parallel_layers={}, stop_grad_strat=0):
         '''
         Function: __init__ \n
         Description: Initializes the Neuromodulated Transformer (decoder version) with the passed parameters. \n
@@ -64,14 +64,18 @@ class NMTransformer(tf.keras.Model):
                 ])
 
         self.decoder = Decoder(num_layers_dec, num_layers_gating, d_model, num_heads, dff, max_seq_len_dec, target_vocab_size,
-                               max_position_encoding_dec, rate, nm_attn, nm_eol, rel_pos_emb=rel_pos_emb)
+                               max_position_encoding_dec, rate, nm_attn, nm_eol, rel_pos_emb=rel_pos_emb, stop_grad_strat=stop_grad_strat)
 
-        self.nm_encoder = NMEncoder(num_layers_nm, d_model, num_heads, dff, max_seq_len_nm, nm_vocab_size,
-                                    max_position_encoding_nm, rate, rel_pos_emb=rel_pos_emb, parallel_layers=parallel_layers)
+        #self.nm_encoder = NMEncoder(num_layers_nm, d_model, num_heads, dff, max_seq_len_nm, nm_vocab_size,
+        #                            max_position_encoding_nm, rate, rel_pos_emb=rel_pos_emb, parallel_layers=parallel_layers)
 
         self.final_layer = tf.keras.layers.Dense(target_vocab_size)
+        #self.multi_choice_final_layer = tf.keras.layers.Dense(9) # there are up to 9 answer options supported.
+        self.RACE_cls_layer = tf.keras.layers.Dense(1, activation='sigmoid') # this gets a single prediction between 1 and 0.
 
-    def call(self, dec_inp, nm_inp, training, nm_mask=None, dec_mask=None):
+        self.num_ans_options = 5
+
+    def call(self, dec_inp, nm_inp, training, nm_mask=None, dec_mask=None, mode="default"):
         '''
         Function: call \n
         Description: Description: Overrides the parent class' call function (i.e. run through the transformer). \n
@@ -91,18 +95,23 @@ class NMTransformer(tf.keras.Model):
         #TODO: NO!!! keep it the same, this will be done in the DataLoader (if pytorch...) Data class that handles the input.
         #TODO: Possibly need to modify the loss function in the helper class depending on the task.
 
-        if self.nm_eol or self.nm_attn or len(self.parallel_keys.keys()) > 0:
-            nm_encoder_input, attn_weights_nm_enc, x_dict = self._run_nm_encoder(nm_inp, training, nm_mask,
-                                                                                 #restrictions=[])
-                                                                                 restrictions=self.parallel_keys) # (output, attn_weights, aux_pred) for each key.
-        else: nm_encoder_input, attn_weights_nm_enc, x_dict = None, None, None
+        #if self.nm_eol or self.nm_attn or len(self.parallel_keys) > 0:
+        #    nm_encoder_input, attn_weights_nm_enc, x_dict = self._run_nm_encoder(nm_inp, training, nm_mask,
+        #                                                                         #restrictions=[])
+        #                                                                         restrictions=self.parallel_keys) # (output, attn_weights, aux_pred) for each key.
+        #else: nm_encoder_input, attn_weights_nm_enc, x_dict = None, None, None
+        nm_encoder_input, attn_weights_nm_enc, x_dict = None, None, None
         # Don't run nm_encoder if both are set to False and there are no parallel_layers.
         # x_dict[key] = (out, attn_weights, aux_pred) aux_pred will not be used, keep as none for support for other alternatives.
+        #print(f"nm_encoder_input should be none, got {nm_encoder_input}")
         dec_output, attn_weights_dec = self._run_decoder(dec_inp, training, nm_encoder_input, dec_mask)
 
-        final_output = self.final_layer(dec_output) # (batch_size, seq_len, vocab_size)
-
-        final_output = tf.nn.softmax(final_output, axis=-1)
+        if mode == "default":
+            final_output = self.final_layer(dec_output) # (batch_size, seq_len, vocab_size)
+            final_output = tf.nn.softmax(final_output, axis=-1)
+        elif mode == "multi_choice":
+            final_output = tf.squeeze(self.RACE_cls_layer(dec_output)) # (batch_size, seq_len)
+            #final_output = tf.math(final_output, axis=-1)
 
         x_dict_output, x_dict_output_weights = dict(), dict() # these will be dictionaries?.
         #TODO add logic for x_dict... it is going to be for metacognition... so need to run in a way without reading strategies to see
@@ -116,6 +125,35 @@ class NMTransformer(tf.keras.Model):
 
         return final_output, attn_weights_dec, attn_weights_nm_enc, x_dict_output, x_dict_output_weights
 
+    def multi_choice_call(self, dec_inp, nm_inp, training, nm_mask=None, dec_mask=None, mode="default"):
+        assert len(dec_inp.shape) == 3 and len(nm_inp.shape) == 3, f"Invalid input dimensions."
+        #print(f"nm_mask: {nm_mask.shape} \t {nm_mask}")
+        #print(f"dec_mask: {dec_mask.shape}")
+        predictions = None
+        for ao in range(self.num_ans_options): # this dimension is the number of answer options.
+            if self.nm_eol or self.nm_attn or len(self.parallel_keys.keys()) > 0:
+                nm_encoder_input, attn_weights_nm_enc, x_dict = self._run_nm_encoder(nm_inp[:,ao,:], training, nm_mask[:,ao,:,:,:],
+                                                                                     # restrictions=[])
+                                                                                     restrictions=self.parallel_keys)  # (output, attn_weights, aux_pred) for each key.
+            else:
+                nm_encoder_input, attn_weights_nm_enc, x_dict = None, None, None
+            # Don't run nm_encoder if both are set to False and there are no parallel_layers.
+            # x_dict[key] = (out, attn_weights, aux_pred) aux_pred will not be used, keep as none for support for other alternatives.
+            dec_output, attn_weights_dec = self._run_decoder(dec_inp[:,ao,:], training, nm_encoder_input, dec_mask[:,ao,:,:,:])
+            if mode == "default":
+                #final_output = self.final_layer(dec_output)  # (batch_size, seq_len, vocab_size)
+                #final_output = tf.nn.softmax(final_output, axis=-1)
+                ao_output = tf.squeeze(self.RACE_cls_layer(dec_output)) # (batch_size, seq_len, 1)
+                assert len(ao_output.shape) == 2, f"The dimension of the ao_output shape should be of length 2!"
+
+            # get prediction for the current answer option!!! -> process into (batch_size)
+            if predictions is None:
+                predictions = tf.expand_dims(ao_output[:,0], axis=1) # 0 corresponds to the <cls> token.
+            else:
+                predictions = tf.concat([predictions, tf.expand_dims(ao_output[:,0], axis=1)], axis=1)
+        # predictions.shape = (batch_size, #ans_options) # NOTE: the number of ao at each batch item may differ, need to pad at dataloader level.
+        predictions = tf.nn.softmax(predictions, axis=-1)
+        return predictions
 
     # helper function for the call method. Refer to the call function docstring for description of parameters.
     def _run_nm_encoder(self, nm_inp, training, mask, restrictions):
@@ -154,6 +192,22 @@ class NMTransformer(tf.keras.Model):
             new_dec_inp = []
             new_nm_inp = []
 
+            if self.nm_eol or self.nm_attn or len(self.parallel_keys.keys()) > 0:
+                nm_encoder_input, attn_weights_nm_enc, x_dict = self._run_nm_encoder(nm_inp, training,
+                                                                                     nm_mask,
+                                                                                     restrictions=self.parallel_keys)  # (output, attn_weights, aux_pred) for ea
+            else:
+                nm_encoder_input, attn_weights_nm_enc, x_dict = None, None, None
+            # Don't run nm_encoder if both are set to False and there are no parallel_layers.
+            # x_dict[key] = (out, attn_weights, aux_pred) aux_pred will not be used, keep as none for support for other alternatives.
+            dec_output, attn_weights_dec = self._run_decoder(dec_inp, training,
+                                                             nm_encoder_input,
+                                                             dec_mask)
+
+            final_output = self.final_layer(dec_output)  # (batch_size, seq_len, vocab_size)
+            final_output = tf.nn.softmax(final_output, axis=-1)  # (batch_size, seq_len, target_vocab_size) batch_size should be 1 here.
+
+
             for b in range(batch_size_):
 
                 if b in generation_done:
@@ -161,21 +215,11 @@ class NMTransformer(tf.keras.Model):
                     new_nm_inp.append(nm_inp[b, :].numpy().tolist()) # no changes to be made here.
                     continue # generation is done for this batch item.
 
-                if self.nm_eol or self.nm_attn or len(self.parallel_keys.keys()) > 0:
-                    nm_encoder_input, attn_weights_nm_enc, x_dict = self._run_nm_encoder(tf.expand_dims(nm_inp[b,:], axis=0), training,
-                                                                                         tf.expand_dims(nm_mask[b,:,:,:], axis=0),
-                                                                                         restrictions=self.parallel_keys)  # (output, attn_weights, aux_pred) for ea
-                else: nm_encoder_input, attn_weights_nm_enc, x_dict = None, None, None
-                # Don't run nm_encoder if both are set to False and there are no parallel_layers.
-                # x_dict[key] = (out, attn_weights, aux_pred) aux_pred will not be used, keep as none for support for other alternatives.
-                dec_output, attn_weights_dec = self._run_decoder(tf.expand_dims(dec_inp[b,:], axis=0), training, nm_encoder_input,
-                                                                 tf.expand_dims(dec_mask[b,:,:,:], axis=0))
 
-                final_output = self.final_layer(dec_output) # (batch_size, seq_len, vocab_size)
-                final_output = tf.nn.softmax(final_output, axis=-1) # (batch_size, seq_len, target_vocab_size) batch_size should be 1 here.
 
                 ## get new prediction and add to first pad index... stop when end_tok_id is reached or gen_len_max is reached. (add another outside loop)
-                id_prediction, pred_index, end, first_pad_element = self._get_pred_id_helper(final_output, tf.expand_dims(dec_inp[b,:], axis=0), pad_tok_id, end_tok_id) #
+                id_prediction, pred_index, end, first_pad_element = self._get_pred_id_helper(tf.expand_dims(final_output[b,:,:], axis=0),
+                                                                                             tf.expand_dims(dec_inp[b,:], axis=0), pad_tok_id, end_tok_id) #
                 #print(f"id_prediction {id_prediction}\tend_tok_id {end_tok_id}")
                 if id_prediction == end_tok_id:
                     #print(f"b: {b} is finished, shouldn't see it processed any more!")
@@ -244,8 +288,73 @@ class NMTransformer(tf.keras.Model):
 
         return id_prediction, pred_index, end, first_pad_element
 
+    def generate_label(self, dec_inp, nm_inp, training, nm_mask, dec_mask,
+                        pad_tok_id=None, end_tok_id=None):
+
+        batch_size_ = dec_inp.shape[0]
+        num_aux_toks = abs(nm_inp.shape[1] - dec_inp.shape[1])
+
+        if self.nm_eol or self.nm_attn or len(self.parallel_keys.keys()) > 0:
+            nm_encoder_input, attn_weights_nm_enc, x_dict = self._run_nm_encoder(nm_inp, training,
+                                                                                 nm_mask,
+                                                                                 restrictions=self.parallel_keys)  # (output, attn_weights, aux_pred) for ea
+        else:
+            nm_encoder_input, attn_weights_nm_enc, x_dict = None, None, None
+        # Don't run nm_encoder if both are set to False and there are no parallel_layers.
+        # x_dict[key] = (out, attn_weights, aux_pred) aux_pred will not be used, keep as none for support for other alternatives.
+        dec_output, attn_weights_dec = self._run_decoder(dec_inp, training,
+                                                         nm_encoder_input,
+                                                         dec_mask)
+
+        final_output = self.final_layer(dec_output)  # (batch_size, seq_len, vocab_size)
+        final_output = tf.nn.softmax(final_output, axis=-1)  # (batch_size, seq_len, target_vocab_size) batch_size should be 1 here.
 
 
+        generated_ids = []
+
+        for b in range(batch_size_):
+
+            ## get new prediction and add to first pad index... stop when end_tok_id is reached or gen_len_max is reached. (add another outside loop)
+            id_prediction, first_pad_element = self._get_label(tf.expand_dims(final_output[b,:,:], axis=0),
+                                                                              tf.expand_dims(dec_inp[b,:], axis=0), pad_tok_id, end_tok_id) #
+
+            # add new prediction to dec_inp and nm_inp, if no pad token, i.e. at max seq length then remove 1st item to make room...
+            # update the padding mask or generate a new one... need to handle graph generation... # can just add to the current mask...
+            if not first_pad_element:
+                generated_ids.append(id_prediction) # [[each will be a single element],[],[],[]]
+
+        #assert len(generated_ids) == batch_size_, f"The number of generated predictions doesn't match the batch size!!!"
+        return generated_ids
+
+    def _get_label(self, prediction, dec_inp, pad_tok_id, end_tok_id):
+        assert prediction.shape[0] == 1, f"The first dimension, the batch size should be equal to 1 for the prediction vector, got {prediction.shape[0]}!"
+        assert dec_inp.shape[0] == 1, f"The first dimension, the batch size should be equal to 1 for the decoder input, got {dec_inp.shape[0]}!"
+
+        pred_index = None
+        for i in range(1,dec_inp.shape[1]):
+            if dec_inp[0,i] == pad_tok_id:
+                pred_index = i-1 # we get the prediction at the previous token.
+                break
+        first_pad_element = False
+        if dec_inp[0,0] == pad_tok_id: first_pad_element = True
+
+
+        end = None
+        if pred_index is not None:
+            id_prediction = tf.argmax(prediction[0,pred_index,:])
+            end = False
+        else: # is None.
+            id_prediction = tf.argmax(prediction[0,-1,:]) # get last seq_len item to get next prediction.
+            end = True
+
+        print(f"prediction_value_max: {prediction[0,pred_index, id_prediction]}")
+
+        id_prediction = id_prediction.numpy().tolist()
+        if isinstance(id_prediction, int): pass
+        elif isinstance(id_prediction, list): id_prediction=id_prediction[0]
+        else: raise Exception(f"id_prediction is not of type int or list, got {type(id_prediction)}!")
+
+        return id_prediction, first_pad_element
 
 
 if __name__ == "__main__":
