@@ -61,7 +61,6 @@ class Tokenizer(object):
     def get_vocab_dict(self):
         return self.tokenizer.get_vocab()
 
-    # TODO should put sample input/output for all.
     def encode_single(self, input):
         assert isinstance(input, str), f"The input ({input}) is not of type string, got {type(input)}!"
         return self.tokenizer.encode(input, add_special_tokens=False, pad_to_max_length=False) # this will be a list.
