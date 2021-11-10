@@ -91,6 +91,7 @@ class NMTransformer(tf.keras.Model):
         self.pos_encoding = positional_encoding(max_position_encoding, d_model)
 
         self.final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,))
+        self.vanilla_set_final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,))
 
     def call(self, str_inp, id_inp, training, mask, reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False):
         '''
@@ -104,7 +105,8 @@ class NMTransformer(tf.keras.Model):
         :param reading_strat_mc_bool: (bool) A boolean value that represents if we are to process in reading strategies mode or not.
         :param vanilla_set_aux_loss_bool: (bool) A boolean value representing if we are updating the vanilla set's weights
             independently of the architecture as a whole as an auxiliary loss.
-        :return: todo
+        :return:
+            vanilla_set_output: (tf.Tensor; [])
         '''
         assert id_inp.shape[1] == self.max_seq_len_nm, f"The sequence length should be equal to {self.max_seq_len_nm}, " \
                                                        f"got {id_inp.shape[1]}!"
@@ -119,12 +121,10 @@ class NMTransformer(tf.keras.Model):
         if not reading_strat_mc_bool:
             task_prediction, attention_weights, vanilla_set_output, gating_weights = self.run_no_rs(id_inp, training, mask)
             if vanilla_set_aux_loss_bool:
-                vanilla_set_output = tf.nn.softmax(self.final_layer(vanilla_set_output), axis=-1)
+                vanilla_set_output = tf.nn.softmax(self.vanilla_set_final_layer(vanilla_set_output), axis=-1)
                 # (batch_size, max_seq_len_dec, target_vocab_size)
                 # this only goes through the vanilla_decoder and final layer.
-            else: vanilla_set_output = None
-        else:
-            pass #todo
+        else: pass
 
         return vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights
 
@@ -136,9 +136,8 @@ class NMTransformer(tf.keras.Model):
         return self.dropout(x, training=training)
 
     def run_no_rs(self, id_inp, training, mask):
-        mode_id = id_inp[0, 2]  # first batch item and the (third) item in the sequence. <cls> <dec> <lm> ...
-        ## NOTE (important): that in a batch only one mode_id is supported. Not an issue except for when reading
-        # strategies are utilized a batch size of 1 is required.
+        mode_id = tf.stop_gradient(id_inp[0, 2])  # first batch item and the (third) item in the sequence. <cls> <dec> <lm> ...
+        ## NOTE (important): that in a batch only one mode_id is supported.
 
         id_inp = self.embedding(id_inp)  # (batch_size, max_seq_len_nm, d_model)
         id_inp = self._pos_encoding_helper(id_inp, training, self.max_seq_len_nm)
@@ -157,9 +156,10 @@ class NMTransformer(tf.keras.Model):
         nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], tf.stop_gradient(vanilla_output)], axis=1)
         # nm_inp.shape = (batch_size, max_seq_len_nm, d_model)
 
-        nm_inp = self._pos_encoding_helper(nm_inp, training, self.max_seq_len_nm) #TODO: why re-apply this?
+        # below has been removed as there is no reason to apply it twice.
+        #nm_inp = self._pos_encoding_helper(nm_inp, training, self.max_seq_len_nm)
 
-        nm_output, attn_weights_nm, mc_output_dict = self.neuromodulation_set_run(nm_inp, training, mask,mode="default")
+        nm_output, attn_weights_nm, mc_output_dict = self.neuromodulation_set_run(nm_inp, training, mask, mode="default")
 
         gating_weights = tf.sigmoid(nm_output[:, -self.max_seq_len_dec:, :])
 
@@ -195,14 +195,21 @@ class NMTransformer(tf.keras.Model):
     def output_set_run(self, id_inp, training, mask, mode_id):
         # mode_id specifies the id. if it matches one in aux
 
-        key_ = self._get_layer_helper(mode_id)
+        #key_ = self._get_layer_helper(mode_id)
+        #print(f"\n\n{self.aux_tok_output_layer_map.keys()}\n\n")
+        #print(f"\n\n{self.aux_tok_output_layer_map.keys()}\n\n")
+        mode_id = mode_id.numpy().tolist()
+        assert isinstance(mode_id, int)
+        key_ = self.aux_tok_output_layer_map[mode_id]
         assert isinstance(key_, str)
         return self.output_layers[key_](id_inp, training, mask)
 
     def _get_layer_helper(self, mode_id):
+        val_ = None
         for key, value in self.aux_tok_output_layer_map.items():
-            if key == mode_id: return value
-        raise Exception(f"Invalid mode_id, it doesn't match a key specified in aux_tok_output_layer_map")
+            if key == mode_id: val_ = value
+        #raise Exception(f"Invalid mode_id, it doesn't match a key specified in aux_tok_output_layer_map")
+        return val_
 
 
 if __name__ == "__main__":
@@ -227,6 +234,7 @@ if __name__ == "__main__":
 
     training = True
     mask = create_padding_mask(id_inp, padding_id=0)
+    #mask = create_combined_mask(id_inp, padding_id=0, num_aux_tok=3)
     reading_strat_mc_bool = False
     vanilla_set_aux_loss_bool = True
 
