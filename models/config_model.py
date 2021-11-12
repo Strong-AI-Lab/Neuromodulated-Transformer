@@ -40,8 +40,11 @@ class V4ConfigMediumSize(object):
         else:
             self.loss_object = loss_object
 
-        #self.learning_rate = tf.keras.optimizers.schedules.CosineDecay(0.00025, decay_steps=100000)
-        self.learning_rate = 0.0001
+        self.learning_rate = None
+        if learning_rate is None:
+            self.learning_rate = 0.0001
+        else:
+            self.learning_rate = learning_rate
 
         self.num_layers_vanilla = 12
         self.num_layers_nm = 12
@@ -132,7 +135,6 @@ class V4ConfigMediumSize(object):
         self.mode_ids[self.summarize_rs] = self.summarize_rs_id
         self.mode_ids[self.paraphrase_rs] = self.paraphrase_rs_id
 
-#TODO 
 class V4Wikitext103Medium(object):
 
     def __init__(self, strategy, batch_size, loss_object, learning_rate,
@@ -164,19 +166,22 @@ class V4Wikitext103Medium(object):
         else:
             self.loss_object = loss_object
 
-        #self.learning_rate = tf.keras.optimizers.schedules.CosineDecay(0.00025, decay_steps=100000)
-        self.learning_rate = 0.0001
+        self.learning_rate = None
+        if learning_rate is None:
+            self.learning_rate = 0.0001
+        else:
+            self.learning_rate = learning_rate
 
         self.num_layers_vanilla = 12
         self.num_layers_nm = 12
-        self.num_layers_mc = 3
+        self.num_layers_mc = 0
         self.num_layers_output = 3
 
         self.d_model = 768
         self.num_heads = 12
         self.dff = self.d_model*4
 
-        tok = BertTokenizer.from_pretrained('bert-base-uncased')
+        tok = TransfoXLTokenizer.from_pretrained("transfo-xl-wt103")
         self.tokenizer = Tokenizer(tok)
         vocab_to_add = None
         with open(vocab_filepath, "r") as f:
@@ -195,9 +200,11 @@ class V4Wikitext103Medium(object):
         self.mask_strategy = "default"
         self.rate=0.1
 
-        self.parallel_layers = ["aoint_rs", "highlighting_rs", "unknown_rs", "summarization_rs", "paraphrasing_rs"]
-        self.output_layers = ["lm", "mqa", "gqa", "highlighting_rs", "summarize_rs", "paraphrase_rs"]
+        self.parallel_layers = []
+        self.output_layers = ["lm"]
 
+        # below can stay the same, it doesn't make a difference if the above two lists
+        # (parallel_layers and output_layers) is empty/near empty.
         self.aux_tok_output_layer_map = {} # key:item | id(int):output_layer(str)
 
         self.lm_tok_id = self.tokenizer.encode_single(self.lm_tok)
@@ -214,7 +221,7 @@ class V4Wikitext103Medium(object):
                 f"The number of ids the start token is encoded into should be one, got {self.mqa_tok_id}!")
         else:
             self.mqa_tok_id = self.mqa_tok_id[0]
-        self.aux_tok_output_layer_map[self.mqa_tok_id] = "mqa"
+        #self.aux_tok_output_layer_map[self.mqa_tok_id] = "mqa"
 
         self.gqa_tok_id = self.tokenizer.encode_single(self.gqa_tok)
         if len(self.gqa_tok_id) != 1 and (isinstance(self.gqa_tok_id, list)):
@@ -222,7 +229,7 @@ class V4Wikitext103Medium(object):
                 f"The number of ids the start token is encoded into should be one, got {self.gqa_tok_id}!")
         else:
             self.gqa_tok_id = self.gqa_tok_id[0]
-        self.aux_tok_output_layer_map[self.gqa_tok_id] = "gqa"
+        #self.aux_tok_output_layer_map[self.gqa_tok_id] = "gqa"
 
         self.highlighting_rs_id = self.tokenizer.encode_single(self.highlighting_rs)
         if len(self.highlighting_rs_id) != 1 and (isinstance(self.highlighting_rs_id, list)):
@@ -230,7 +237,7 @@ class V4Wikitext103Medium(object):
                 f"The number of ids the start token is encoded into should be one, got {self.highlighting_rs_id}!")
         else:
             self.highlighting_rs_id = self.highlighting_rs_id[0]
-        self.aux_tok_output_layer_map[self.highlighting_rs_id] = "highlighting_rs"
+        #self.aux_tok_output_layer_map[self.highlighting_rs_id] = "highlighting_rs"
 
         self.summarize_rs_id = self.tokenizer.encode_single(self.summarize_rs)
         if len(self.summarize_rs_id) != 1 and (isinstance(self.summarize_rs_id, list)):
@@ -238,7 +245,7 @@ class V4Wikitext103Medium(object):
                 f"The number of ids the start token is encoded into should be one, got {self.summarize_rs_id}!")
         else:
             self.summarize_rs_id = self.summarize_rs_id[0]
-        self.aux_tok_output_layer_map[self.summarize_rs_id] = "summarize_rs"
+        #self.aux_tok_output_layer_map[self.summarize_rs_id] = "summarize_rs"
 
         self.paraphrase_rs_id = self.tokenizer.encode_single(self.paraphrase_rs)
         if len(self.paraphrase_rs_id) != 1 and (isinstance(self.paraphrase_rs_id, list)):
@@ -246,7 +253,7 @@ class V4Wikitext103Medium(object):
                 f"The number of ids the start token is encoded into should be one, got {self.paraphrase_rs_id}!")
         else:
             self.paraphrase_rs_id = self.paraphrase_rs_id[0]
-        self.aux_tok_output_layer_map[self.paraphrase_rs_id] = "paraphrase_rs"
+        #self.aux_tok_output_layer_map[self.paraphrase_rs_id] = "paraphrase_rs"
 
         self.mode_ids = {}
         self.mode_ids[self.lm_tok] = self.lm_tok_id
