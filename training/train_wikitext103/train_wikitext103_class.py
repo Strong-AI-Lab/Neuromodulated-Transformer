@@ -45,9 +45,11 @@ class SlidingWindowTrain(ParentTrainNL):
         self.window_size_train = window_size_train
         self.window_size_val = window_size_val
 
+        self.model.fixed_output_layer = self.model.output_layers["lm"] # hardcoded for C4 pre-training
+
     def train_step(self, tar_inp, tar_real, num_aux_tokens, isStart):
 
-        #tar_inp includes the nm_tokens here in accordance to V4 of the NMT.
+        #tar_inp includes thMina Rastegar, Ehsan Mehrabi Kermani, and Massoud Khabir. “The relation-ship between metacognitive reading strategies use and reading comprehensionachievement of EFe nm_tokens here in accordance to V4 of the NMT.
         # utilizes the auxiliary loss as a default.
         lambda_ = 0.25
         mask = create_combined_mask(tar_inp, self.padding_id)
@@ -56,7 +58,8 @@ class SlidingWindowTrain(ParentTrainNL):
         with tf.GradientTape() as tape:
             vanilla_set_output, _, task_prediction, _, _ = self.model(None, tar_inp, training=True, mask=mask,
                                                                       reading_strat_mc_bool=False,
-                                                                      vanilla_set_aux_loss_bool=True)
+                                                                      vanilla_set_aux_loss_bool=True,
+                                                                      fixed_output=True)
 
             #real, pred, loss_object, padding_id, window_size, isStart, domask2 = False
             loss, size = self.loss_function(tar_real, task_prediction, self.loss_object, self.padding_id,
@@ -72,7 +75,7 @@ class SlidingWindowTrain(ParentTrainNL):
 
         return loss, size
 
-    #@tf.function
+    @tf.function
     def _distributed_train_step(self, tar_inp, tar_real, num_aux_tokens, isStart):
         if self.strategy is not None:
             loss, size = self.strategy.run(self.train_step, args=(tar_inp, tar_real, num_aux_tokens, isStart,))

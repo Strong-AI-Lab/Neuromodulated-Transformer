@@ -279,9 +279,9 @@ if __name__ == "__main__":
     #print("REACH")
     for (inp_str, inp_id, tar_id) in generator:
         print(f"batch: {batch_}")
-        #print(f"inp_str: {inp_str.shape} \t inp_str: {inp_str} \n"
-        #        f"inp_id.shape: {inp_id.shape} \t inp_id: {inp_id} \n"
-        #        f"tar_id.shape: {tar_id.shape} \t tar_id: {tar_id} \n")
+        print(f"inp_str: {inp_str.shape} \t inp_str: {None} \n"
+                f"inp_id.shape: {inp_id.shape} \t inp_id: {None} \n"
+                f"tar_id.shape: {tar_id.shape} \t tar_id: {None} \n")
         if batch_ == 5: break
         batch_ += 1
     print(f"batch_ counter: {batch_}")

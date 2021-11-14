@@ -31,11 +31,10 @@ from load_datasets.MasterDataLoader import *
 
 if __name__ == "__main__":
 
-    config = V4ConfigMediumSize(strategy="MirroredStrategy", batch_size=4*GPUS_AVAILABLE,
+    config = V4ConfigMediumSize(strategy="MirroredStrategy", batch_size=8*GPUS_AVAILABLE,
                                 loss_object=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False, reduction='none'),
                                 learning_rate=tf.keras.optimizers.schedules.CosineDecay(0.0001, decay_steps=1000000),
                                 vocab_filepath="/data/kkno604/Neuromodulated-Transformer/vocabulary/vocab1.txt")
-
     strategy = config.strategy
 
     transformer, optimizer = None, None
@@ -77,9 +76,10 @@ if __name__ == "__main__":
                                            checkpoint_path_recent="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain_C4/",
                                            checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
                                            recent_to_keep=5, load_recent=True, best_to_keep=5, load_best=False,
-                                           load_specific_path="", enc_tok_id=config.tokenizer.encode_single("<enc>")[0],
+                                           load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain_C4/ckpt-15",
+                                           enc_tok_id=config.tokenizer.encode_single("<enc>")[0],
                                            dec_tok_id=config.tokenizer.encode_single("<dec>")[0])
-    train_class.train_iteration(epoch_start=0, epoch_end=1, iteration_counter=0,
+    train_class.train_iteration(epoch_start=0, epoch_end=1, iteration_counter=78210,
                                 save_filepath_train="/data/kkno604/NMTransformer_pretraining/Results/pretrain_C4/",
                                 data_dict=data_dict, num_aux_tokens=config.num_aux_toks, save_end_epoch=True,
                                 print_every_iterations=100, save_every_iterations=5000)

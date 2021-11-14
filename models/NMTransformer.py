@@ -23,6 +23,27 @@ class NMTransformer(tf.keras.Model):
                  max_seq_len_dec=768, num_aux_toks=9, mask_strategy="default",
                  rate=0.1, parallel_layers=None, output_layers=None,
                  aux_tok_output_layer_map={}, mode_ids={}):
+        '''
+        :param num_layers_vanilla: (int) An integer representing the number of layers in the "vanilla set".
+        :param num_layers_nm: (int) An integer representing the number of layers in the "neuormodulation set".
+        :param num_layers_mc: (int) An integer representing the number of layers in the "metacognition sets".
+        :param num_layers_output: (int) An integer representing the number of layers in the "output sets".
+        :param d_model: (int) An integer specifying dimension of the NMT.
+        :param num_heads: (int) An integer specifying the number of heads in each multi-head attention layer.
+        :param dff: (int) An integer specifying the dimension of all feed-forward layers.
+        :param input_vocab_size: (int) An integer specifying the number vocabulary size of the input language.
+        :param output_vocab_size: (int) An integer specifying the number vocabulary size of the output language.
+        :param max_position_encoding: (int) An integer specifying the maximum position encoding length for absolute fixed
+            position embeddings.
+        :param max_seq_len_dec: (int) An integer specifying the maximum sequence length of the input.
+        :param num_aux_toks: (int) An integer specifying the number of auxiliary tokens -> used to get max_seq_len_nm.
+        :param mask_strategy: (str) A string specifying the mask strategy for the NMT, currenty not supported.
+        :param rate: (float) A floating point number specifying the dropout rate for all dropout layers.
+        :param parallel_layers: (list) A list of strings specifying the name of each parallel layer in the neuromodulation set.
+        :param output_layers: (list) A list of strings specifying the name of each parallel output set (there are multiple output sets).
+        :param aux_tok_output_layer_map: (dict) A dictionary which maps the key (aux id): to an item (string representing a set of layers in the output set)
+        :param mode_ids: (dict) A dictionary which maps a key (string|aux_tok representing output layer name) to an item (int|id of that token)
+        '''
 
         #TODO add relevant token ids for later and a description of each parameters...
         super(NMTransformer, self).__init__()
@@ -65,6 +86,7 @@ class NMTransformer(tf.keras.Model):
                              "highlighting",
                              "summarization",
                              "paraphrasing"] # default to generate answer.
+        self.fixed_output_layer = None # This is to manually be changed if it is to be used.
 
         self.aux_tok_output_layer_map = aux_tok_output_layer_map # maps an id to a string, representing the output layer.
         for key, item in self.aux_tok_output_layer_map.items():
@@ -93,7 +115,8 @@ class NMTransformer(tf.keras.Model):
         self.final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,))
         self.vanilla_set_final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,))
 
-    def call(self, str_inp, id_inp, training, mask, reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False):
+    def call(self, str_inp, id_inp, training, mask, reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
+             fixed_output=False):
         '''
         Description: One run through the NMTransformer that generates an output based on the prediction.
         :param str_inp: (tf.Tenor{tf.dtypes.string}; [batch_size, max_seq_len_nm (nothing actually enforces this)])
@@ -108,6 +131,10 @@ class NMTransformer(tf.keras.Model):
         :return:
             vanilla_set_output: (tf.Tensor; [])
         '''
+
+        if fixed_output: assert self.fixed_output_layer is not None
+        if not fixed_output: assert self.fixed_output_layer is None
+
         assert id_inp.shape[1] == self.max_seq_len_nm, f"The sequence length should be equal to {self.max_seq_len_nm}, " \
                                                        f"got {id_inp.shape[1]}!"
 
@@ -119,7 +146,7 @@ class NMTransformer(tf.keras.Model):
         attention_weights = {}
 
         if not reading_strat_mc_bool:
-            task_prediction, attention_weights, vanilla_set_output, gating_weights = self.run_no_rs(id_inp, training, mask)
+            task_prediction, attention_weights, vanilla_set_output, gating_weights = self.run_no_rs(id_inp, training, mask, fixed_output)
             if vanilla_set_aux_loss_bool:
                 vanilla_set_output = tf.nn.softmax(self.vanilla_set_final_layer(vanilla_set_output), axis=-1)
                 # (batch_size, max_seq_len_dec, target_vocab_size)
@@ -135,7 +162,7 @@ class NMTransformer(tf.keras.Model):
         x /= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))  # re-normalize the input embeddings.
         return self.dropout(x, training=training)
 
-    def run_no_rs(self, id_inp, training, mask):
+    def run_no_rs(self, id_inp, training, mask, fixed_output):
         mode_id = tf.stop_gradient(id_inp[0, 2])  # first batch item and the (third) item in the sequence. <cls> <dec> <lm> ...
         ## NOTE (important): that in a batch only one mode_id is supported.
 
@@ -163,8 +190,12 @@ class NMTransformer(tf.keras.Model):
 
         gating_weights = tf.sigmoid(nm_output[:, -self.max_seq_len_dec:, :])
 
-        output_, attn_weights_output = self.output_set_run(gating_weights * vanilla_output,
+        if not fixed_output:
+            output_, attn_weights_output = self.output_set_run(gating_weights * vanilla_output,
                                                            training, vanilla_mask, mode_id)
+        else:
+            output_, attn_weights_output = self.fixed_output_set_run(gating_weights * vanilla_output,
+                                                           training, vanilla_mask)
 
         attention_weights["vanilla_attention_weights"] = attn_weights_vanilla
         attention_weights["nm_attention_weights"] = attn_weights_nm
@@ -203,6 +234,9 @@ class NMTransformer(tf.keras.Model):
         key_ = self.aux_tok_output_layer_map[mode_id]
         assert isinstance(key_, str)
         return self.output_layers[key_](id_inp, training, mask)
+
+    def fixed_output_set_run(self, id_inp, training, mask):
+        return self.fixed_output_layer(id_inp, training, mask)
 
     def _get_layer_helper(self, mode_id):
         val_ = None

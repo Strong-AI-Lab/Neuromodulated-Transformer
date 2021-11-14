@@ -47,6 +47,7 @@ class NMTransformerPreTrainDec(ParentTrainNL):
         self.dec_tok_id = dec_tok_id
 
         self.loss_function = loss_function
+        self.model.fixed_output_layer = self.model.output_layers["lm"] # hardcoded for C4 pre-training
 
     def train_step(self, inp_str, inp_id, tar_id, num_aux_tokens):
 
@@ -58,7 +59,8 @@ class NMTransformerPreTrainDec(ParentTrainNL):
         with tf.GradientTape() as tape:
             vanilla_set_output, _, task_prediction, _, _ = self.model(inp_str, inp_id, training=True, mask=mask,
                                                                       reading_strat_mc_bool=False,
-                                                                      vanilla_set_aux_loss_bool=True)
+                                                                      vanilla_set_aux_loss_bool=True,
+                                                                      fixed_output=True)
             # ret (vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights)
             #vanilla_set_output is after it has been passed through dense layer...
 
@@ -76,7 +78,7 @@ class NMTransformerPreTrainDec(ParentTrainNL):
 
         return loss, size
 
-    #@tf.function
+    @tf.function
     def _distributed_train_step(self, inp_str, inp_id, tar_id, num_aux_tokens):
         loss_dec, size_dec = None, None
         if self.strategy is not None:
