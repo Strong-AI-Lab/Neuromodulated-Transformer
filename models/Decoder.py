@@ -100,16 +100,15 @@ class Decoder(tf.keras.layers.Layer):
         self.decoder_layers = [DecoderLayer(d_model, num_heads, dff, mask_strategy, rate=rate) for _ in range(num_layers)]
         self.dropout = tf.keras.layers.Dropout(rate, input_shape=(d_model,))
 
-    def call(self, x, training, mask, do_aoint=[False, 0, 0]):
+    def call(self, x, training, mask, do_aoint_bool=False, do_aoint_indices=[0, 0]):
         '''
         :param x: (tf.Tensor; [batch_size, seq_len, d_model]) A tensor representing the input to the decoder component.
         :param training: (bool) A boolean value specifying if we are in training mode for layers which have differnt modes
             for training an non-training.
         :param mask: (tf.Tensor; [batch_size, ..., ..., seq_len]) A tensor representing the mask to be used in multi-head attention.
-        :param do_aoint: (list; [bool, start_int, end_int])
-            (bool) A boolean value specifying if we are to proceed with answer option interaction reading strategy first.
-            (int) An integer specifying the starting position of the answer options.
-            (int) An integer specifying the end position of the answer options.
+        :param do_aoint_bool: (bool) A boolean value indicating if the answer aption reading strategy is to be utilized.
+        :param do_aoint_indices: (list; [start_int, end_int]) A list of two integers where the first specifies the first
+            specifies the start index and the second specifies the second index.
         :return: (tf.Tensor; [batch_size, max_seq_len, d_model]) |
             (dict of tf.Tensor; [batch_size, num_heads, seq_len, seq_len (can vary)])
         '''
