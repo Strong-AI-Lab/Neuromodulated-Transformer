@@ -114,8 +114,8 @@ class Decoder(tf.keras.layers.Layer):
         '''
 
         seq_len = x.shape[1]
-        if do_aoint[0]:
-            x = self.aoint_helper(x, do_aoint[1], do_aoint[2])
+        if do_aoint_bool:
+            x = self.aoint_helper(x, do_aoint_indices[0], do_aoint_indices[1])
 
         attention_weights = dict()
         for i, layer in enumerate(self.decoder_layers):

@@ -538,7 +538,7 @@ class MasterDataLoaderTF(object):
             stop_gen2 = False
             while True:
 
-                input_string, input_id, label, aoint_indices, sample_weights, aux_tok_1, aux_tok_2 = None, None, None, None, None
+                input_string, input_id, label, aoint_indices, sample_weights, aux_tok_1, aux_tok_2 = None, None, None, None, None, None, None
                 curr_gen = ''
                 stop_all = True
                 if random.random() > 0.5:
@@ -637,7 +637,7 @@ class MasterDataLoaderTF(object):
             while True:
                 break_ = False
                 #try: # Safety so whole training isn't stopped for one error. No error should be reached.
-                input_string, input_id, aoint_indices, aux_tok_1, aux_tok_2 = next(mini_generator)  # label will be a list of one element, the correct answer...
+                input_string, input_id, aoint_indices, all_labels, correct_ao, aux_tok_1, aux_tok_2 = next(mini_generator)  # label will be a list of one element, the correct answer...
                 #except RuntimeError as e:  # stopIteration
                 ##    print(f"Runtime Error: {e} \n Continuing as per normal as generator has nothing left to generate!")
                  #   break_ = True
@@ -659,8 +659,10 @@ class MasterDataLoaderTF(object):
                 input_string = tf.cast(tf.convert_to_tensor(input_string), dtype=tf.dtypes.string)
                 input_id = tf.cast(tf.convert_to_tensor(input_id), dtype=tf.dtypes.int64)
                 aoint_indices = tf.cast(tf.convert_to_tensor(aoint_indices), dtype=tf.dtypes.int64)
+                all_labels = tf.cast(tf.convert_to_tensor(np.asarray(all_labels)), dtype=tf.dtypes.string)
+                correct_ao = tf.cast(tf.convert_to_tensor(np.asarray(correct_ao)), dtype=tf.dtypes.string)
 
-                yield input_string, input_id, aoint_indices,
+                yield input_string, input_id, all_labels, correct_ao, aoint_indices
         else: raise Exception(f"Invalid mode_!")
 
     def get_generator(self, type: str, shuffle: bool, race_label_bool=False):
@@ -702,6 +704,8 @@ class MasterDataLoaderTF(object):
             generator = tf.data.Dataset.from_generator(self.get_race_dataloader,
                                                        output_types=(tf.dtypes.string,
                                                                      tf.dtypes.int64,
+                                                                     tf.dtypes.string,
+                                                                     tf.dtypes.string,
                                                                      tf.dtypes.int64))
         elif type == "RACE_combined_train" or type == "RACE_combined_val":
             generator = tf.data.Dataset.from_generator(self.get_race_dataloader,
@@ -714,6 +718,8 @@ class MasterDataLoaderTF(object):
             generator = tf.data.Dataset.from_generator(self.get_race_dataloader,
                                                        output_types=(tf.dtypes.string,
                                                                      tf.dtypes.int64,
+                                                                     tf.dtypes.string,
+                                                                     tf.dtypes.string,
                                                                      tf.dtypes.int64))
 
         return generator

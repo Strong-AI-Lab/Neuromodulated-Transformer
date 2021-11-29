@@ -74,6 +74,10 @@ class V4ConfigMediumSize(object):
         self.mask_strategy = "default"
         self.rate=0.1
 
+        # note: if a problem with checkpoints, change below to output_layers = ["lm"] and comment out
+        # self.aux_tok_output_layer_map[self.lm_tok_id] = "lm" etc if not = "lm".
+        # this shouldn't be an issue as they are named...
+        # just noting here so it can be replicated if needed, just in case there is an issue.
         self.parallel_layers = ["aoint_rs", "highlighting_rs", "unknown_rs", "summarization_rs", "paraphrasing_rs"]
         self.output_layers = ["lm", "mqa", "gqa", "highlighting_rs", "summarize_rs", "paraphrase_rs"]
 
@@ -200,8 +204,17 @@ class V4Wikitext103Medium(object):
         self.mask_strategy = "default"
         self.rate=0.1
 
-        self.parallel_layers = []
-        self.output_layers = ["lm"]
+        self.parallel_layers = ["aoint_rs",
+                                "highlighting_rs",
+                                "unknown_rs",
+                                "summarization_rs",
+                                "paraphrasing_rs"]
+        self.output_layers = ["lm",
+                             "mqa",
+                             "generate_answer",
+                             "highlighting",
+                             "summarization",
+                             "paraphrasing"]
 
         # below can stay the same, it doesn't make a difference if the above two lists
         # (parallel_layers and output_layers) is empty/near empty.
@@ -221,7 +234,7 @@ class V4Wikitext103Medium(object):
                 f"The number of ids the start token is encoded into should be one, got {self.mqa_tok_id}!")
         else:
             self.mqa_tok_id = self.mqa_tok_id[0]
-        #self.aux_tok_output_layer_map[self.mqa_tok_id] = "mqa"
+        self.aux_tok_output_layer_map[self.mqa_tok_id] = "mqa"
 
         self.gqa_tok_id = self.tokenizer.encode_single(self.gqa_tok)
         if len(self.gqa_tok_id) != 1 and (isinstance(self.gqa_tok_id, list)):
@@ -229,7 +242,7 @@ class V4Wikitext103Medium(object):
                 f"The number of ids the start token is encoded into should be one, got {self.gqa_tok_id}!")
         else:
             self.gqa_tok_id = self.gqa_tok_id[0]
-        #self.aux_tok_output_layer_map[self.gqa_tok_id] = "gqa"
+        self.aux_tok_output_layer_map[self.gqa_tok_id] = "gqa"
 
         self.highlighting_rs_id = self.tokenizer.encode_single(self.highlighting_rs)
         if len(self.highlighting_rs_id) != 1 and (isinstance(self.highlighting_rs_id, list)):
@@ -237,7 +250,7 @@ class V4Wikitext103Medium(object):
                 f"The number of ids the start token is encoded into should be one, got {self.highlighting_rs_id}!")
         else:
             self.highlighting_rs_id = self.highlighting_rs_id[0]
-        #self.aux_tok_output_layer_map[self.highlighting_rs_id] = "highlighting_rs"
+        self.aux_tok_output_layer_map[self.highlighting_rs_id] = "highlighting_rs"
 
         self.summarize_rs_id = self.tokenizer.encode_single(self.summarize_rs)
         if len(self.summarize_rs_id) != 1 and (isinstance(self.summarize_rs_id, list)):
@@ -245,7 +258,7 @@ class V4Wikitext103Medium(object):
                 f"The number of ids the start token is encoded into should be one, got {self.summarize_rs_id}!")
         else:
             self.summarize_rs_id = self.summarize_rs_id[0]
-        #self.aux_tok_output_layer_map[self.summarize_rs_id] = "summarize_rs"
+        self.aux_tok_output_layer_map[self.summarize_rs_id] = "summarize_rs"
 
         self.paraphrase_rs_id = self.tokenizer.encode_single(self.paraphrase_rs)
         if len(self.paraphrase_rs_id) != 1 and (isinstance(self.paraphrase_rs_id, list)):
@@ -253,7 +266,7 @@ class V4Wikitext103Medium(object):
                 f"The number of ids the start token is encoded into should be one, got {self.paraphrase_rs_id}!")
         else:
             self.paraphrase_rs_id = self.paraphrase_rs_id[0]
-        #self.aux_tok_output_layer_map[self.paraphrase_rs_id] = "paraphrase_rs"
+        self.aux_tok_output_layer_map[self.paraphrase_rs_id] = "paraphrase_rs"
 
         self.mode_ids = {}
         self.mode_ids[self.lm_tok] = self.lm_tok_id

@@ -671,7 +671,7 @@ class RACEDataLoader:
                     label_ = [self.pad_tok_id for i in range(len(input_id)-len(label_data_id_string[0])-1)] + label_data_id_string[0] + [self.pad_tok_id]
                     #         [blah, blah, ..., </s> correct_ao_1, correct_ao_2, </s>]
                     # [<pad>, <pad>, ..., <pad>, correct_ao_1, correct_ao_2, </s>, <pad>]
-                    print(f"input_id: {input_id}\nlabel: {label_}")
+                    #print(f"input_id: {input_id}\nlabel: {label_}")
                     assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
                                                          f"of the input id ({len(input_id)})"
                     sample_weights = [1] # A placeholder for if it is needed layer on...
@@ -748,5 +748,7 @@ class RACEDataLoader:
 
                     #sample_weights = [1] # A placeholder for if it is needed layer on...
 
-                    yield input_string, input_id, [start_index, end_index], self.dec_tok_id, self.mqa_tok_id
+                    # all_labels is a string of all answer options one after another.
+                    # label is a string representing the correct label (only).
+                    yield input_string, input_id, all_labels, label, [start_index, end_index], self.dec_tok_id, self.mqa_tok_id
             yield None, None, None, None, None
