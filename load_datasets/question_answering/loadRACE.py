@@ -733,7 +733,7 @@ class RACEDataLoader:
 
                     data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(input_, max_seq_len=10000000) # [0] is ids [1] is string version...
 
-                    start_index = data_id_string.index(self.a1_tok_id)  # there is only one match, so .index is sufficient.
+                    start_index = data_id_string[0].index(self.a1_tok_id)  # there is only one match, so .index is sufficient.
                     end_index = len(data_id_string) - 1  # this doesn't include the correct answer option, but does include </s> token at the end.
 
                     if len(data_id_string[1]) > self.seq_len: # handles if there is overflow. compress some of the passage.
@@ -751,4 +751,4 @@ class RACEDataLoader:
                     # all_labels is a string of all answer options one after another.
                     # label is a string representing the correct label (only).
                     yield input_string, input_id, all_labels, label, [start_index, end_index], self.dec_tok_id, self.mqa_tok_id
-            yield None, None, None, None, None
+            yield None, None, None, None, None, None, None

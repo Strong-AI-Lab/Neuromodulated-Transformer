@@ -3,8 +3,8 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3,4"
-GPUS_AVAILABLE = 4
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+GPUS_AVAILABLE = 1
 
 import sys
 sys.path.append("../..")
@@ -64,37 +64,26 @@ if __name__ == "__main__":
                                     aux_tok_output_layer_map=config.aux_tok_output_layer_map, mode_ids=config.mode_ids)
         optimizer = tf.keras.optimizers.Adam(config.learning_rate)
 
-    filepaths = {"RACE_high_train": "/large_data/RACE/train/high/",
-                 "RACE_high_val": "/large_data/RACE/dev/high/",
-                 "RACE_middle_train": "/large_data/RACE/train/middle/",
-                 "RACE_middle_val": "/large_data/RACE/dev/middle/"}
-    dloader_train = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size, tokenizer=config.tokenizer)
+    filepaths = {"RACE_high_test": "/large_data/RACE/test/high/",
+                 "RACE_middle_test": "/large_data/RACE/test/middle/"}
+    dloader_test = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size, tokenizer=config.tokenizer)
     #generator = dloader_train.get_generator(type="C4_pretrain_dec", shuffle=False).batch(config.batch_size)
-    generator_train = dloader_train.get_generator("RACE_combined_train", False).batch(config.batch_size)
+    generator_test = dloader_test.get_generator("RACE_middle_test", False).batch(config.batch_size)
+    #generator_test = dloader_test.get_generator("RACE_high_test", False).batch(config.batch_size)
 
     data_dict = {}
-    data_dict["train"] = generator_train
+    data_dict["test"] = generator_test
     if strategy is not None:
-        data_dict["train"] = strategy.experimental_distribute_dataset(data_dict["train"])
-
-    dloader_val = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size,
-                                 tokenizer=config.tokenizer)
-    generator_val = dloader_val.get_generator("RACE_combined_val", False).batch(config.batch_size)
-
-    data_dict["val"] = generator_val
-    if strategy is not None:
-        data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
+        data_dict["test"] = strategy.experimental_distribute_dataset(data_dict["test"])
 
     train_class = ParentFineTuningNL(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
-                                           checkpoint_path_recent="/home/kkno604/Documents/V4 NMT Results/finetuning/RACE/Checkpoints/",
-                                           strategy=strategy, pad_token="<pad>", recent_to_keep=7, load_recent=True,
-                                           load_specific_path="",
+                                           checkpoint_path_recent="/data/kkno604/NMTransformer_fine_tuning/RACE/Checkpoints2/",
+                                           strategy=strategy, pad_token="<pad>", recent_to_keep=5, load_recent=False,
+                                           load_specific_path="/data/kkno604/NMTransformer_fine_tuning/RACE/Checkpoints/ckpt-177",
                                            enc_tok_id=config.tokenizer.encode_single("<enc>")[0],
                                            dec_tok_id=config.tokenizer.encode_single("<dec>")[0],
                                            output_layer_name="mqa")
 
-    train_class.train_batch(epoch_start=5, epoch_end=7, iteration_counter=0,
-                            save_filepath_train="/home/kkno604/Documents/V4 NMT Results/finetuning/RACE/Results/",
-                            save_filepath_val="/home/kkno604/Documents/V4 NMT Results/finetuning/RACE/Results/",
-                            data_dict=data_dict, num_aux_tokens=config.num_aux_toks, save_end_epoch=True,
-                            print_every_iterations=100, save_every_iterations=5000)
+    train_class.generate_answer_test(e=0, save_filepath="/data/kkno604/NMTransformer_fine_tuning/RACE/Accuracy_results/",
+                                     data=data_dict["test"], num_aux_tokens=config.num_aux_toks,
+                                     max_generate_len=50, attn_strat="full_attn", filename_prefix="test_epoch3")

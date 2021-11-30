@@ -637,7 +637,7 @@ class MasterDataLoaderTF(object):
             while True:
                 break_ = False
                 #try: # Safety so whole training isn't stopped for one error. No error should be reached.
-                input_string, input_id, aoint_indices, all_labels, correct_ao, aux_tok_1, aux_tok_2 = next(mini_generator)  # label will be a list of one element, the correct answer...
+                input_string, input_id, all_labels, correct_ao, aoint_indices, aux_tok_1, aux_tok_2 = next(mini_generator)  # label will be a list of one element, the correct answer...
                 #except RuntimeError as e:  # stopIteration
                 ##    print(f"Runtime Error: {e} \n Continuing as per normal as generator has nothing left to generate!")
                  #   break_ = True

@@ -11,6 +11,7 @@ import tensorflow as tf
 import numpy as np
 import math
 import time
+import re
 
 #import checkmate
 #from chedecckmate import BestCheckPointSaver
@@ -270,9 +271,10 @@ class ParentFineTuningNL:
 
         mask = create_combined_mask(input_id, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
 
-        generated_ids = self.model.generate_answer(inp_id, nm_inp_id, training=False, nm_mask=nm_mask,
-                                                     dec_mask=dec_mask,
-                                                     pad_tok_id=self.padding_id, end_tok_id=self.end_tok_id)
+        generated_ids = self.model.generate_answer(input_string, input_id, training=False, mask=mask,
+                                                   reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
+                                                   fixed_output=True, pad_tok_id=self.padding_id,
+                                                   end_tok_id=self.end_tok_id, gen_len_max=max_generate_len)
 
         convert_byte_to_string = lambda i: i.decode("utf-8")
         all_labels = [convert_byte_to_string(x) for x in all_labels.numpy().tolist()]  # list of strings.
@@ -280,12 +282,12 @@ class ParentFineTuningNL:
         correct_ao = [convert_byte_to_string(x) for x in correct_ao.numpy().tolist()]  # list of strings.
         # print(f"cor_label: {cor_label}")
 
-        cor, tot = self._accuracy_helper(all_labels, correct_ao, generated_ids) # for a fully generated answer.
+        #print(f"all_labels: {all_labels} \n correct_ao: {correct_ao} \n generated_answer: {self.tokenizer.batch_decode(generated_ids)}")
+
+        correct, total = self._accuracy_helper(all_labels, correct_ao, generated_ids) # for a fully generated answer.
         #cor, tot = self._accuracy_helper2(correct_ao, generated_labels) # for a single label only...
 
-        print(f"Batch accuracy: {cor / tot}")
-        correct += cor
-        total += tot
+        print(f"Batch accuracy: {correct / total}")
         # return loss_enc, size_enc, loss_dec, size_dec
         return correct, total
 
@@ -392,26 +394,26 @@ class ParentFineTuningNL:
 
     def _distributed_test_step(self, input_string, input_id, all_labels, correct_ao, aoint_indices,
                                num_aux_tokens, max_generate_len):
-        loss_dec, size_dec = None, None
+        correct, total = None, None
         if self.strategy is not None:
-            loss_dec, size_dec = self.strategy.run(self.test_step, args=(
+            correct, total = self.strategy.run(self.test_step, args=(
             input_string, input_id, all_labels, correct_ao, aoint_indices, num_aux_tokens, max_generate_len,))
 
             # The if else may be totally irrelevant.
             if self.strategy.num_replicas_in_sync > 1:
-                loss_dec = tf.reduce_sum(loss_dec.values)
-                size_dec = tf.reduce_sum(size_dec.values)
+                correct = tf.reduce_sum(correct.values)
+                total = tf.reduce_sum(total.values)
             else:
-                loss_dec = tf.reduce_sum(loss_dec)
-                size_dec = tf.reduce_sum(size_dec)
+                correct = tf.reduce_sum(correct)
+                total = tf.reduce_sum(total)
         else:
-            loss_dec, size_dec = self.test_step(input_string, input_id, all_labels, correct_ao, aoint_indices,
+            correct, total = self.test_step(input_string, input_id, all_labels, correct_ao, aoint_indices,
                                                 num_aux_tokens, max_generate_len)
 
-        return loss_dec, size_dec
+        return correct, total
 
     def generate_answer_test(self, e, save_filepath, data, num_aux_tokens,
-                             max_generate_len=100, attn_strat="full_attn", filename_suffix="test"):  # greedy decoding.
+                             max_generate_len=100, attn_strat="full_attn", filename_prefix="test"):  # greedy decoding.
         # print(f"This generate_answer_test function gets the loss and accuracy on the data. \n"
         #      f"The data's format should be (input_string (w/out teacher forcing), input_id (w/out teacher forcing), "
         #      f"correct_ans(e.g. A or B...) in id format)")
@@ -434,7 +436,7 @@ class ParentFineTuningNL:
         header = True if e == 0 else False
         #self._save_epoch_results_nm("test", e+1, save_filepath, header, None, total_accuracy)
         #self._save_test_results_nm_race(filename_suffix, save_filepath, total_accuracy, correct_samples, total_samples)
-        self._save_epoch_accuracy_only("test", e+1, save_filepath, header, total_accuracy, correct_samples, total_samples)
+        self._save_epoch_accuracy_only(filename_prefix, e+1, save_filepath, header, total_accuracy, correct_samples, total_samples)
 
     def _save_epoch_loss_only(self, type_, epoch, save_filepath, header, loss):
 

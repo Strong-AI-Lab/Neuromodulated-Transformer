@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+import re
 
 import sys
 sys.path.append("..")
@@ -306,7 +307,7 @@ class NMTransformer(tf.keras.Model):
 
         generation_done = set()
         # id_inp includes the auxliary token.
-        generated_ids = [[] for _ in range(id_inp.shape[0]-self.num_aux_toks)]
+        generated_ids = [[] for _ in range(id_inp.shape[0])]
 
         #num_aux_toks = abs(nm_inp.shape[1] - dec_inp.shape[1])
         #self.num_aux_toks
@@ -342,8 +343,8 @@ class NMTransformer(tf.keras.Model):
                 ## get new prediction and add to first pad index... stop when end_tok_id is reached or gen_len_max is reached. (add another outside loop)
                 id_prediction, pred_index, end, first_pad_element = self._get_pred_id_helper(
                     tf.expand_dims(task_prediction[b, :, :], axis=0),
-                    tf.expand_dims(id_inp[b, :], axis=0), pad_tok_id, end_tok_id)  #
-                # print(f"id_prediction {id_prediction}\tend_tok_id {end_tok_id}")
+                    tf.expand_dims(id_inp[b, self.num_aux_toks:], axis=0), pad_tok_id, end_tok_id)  #
+                #print(f"id_prediction {id_prediction}\tend_tok_id {end_tok_id}")
                 if id_prediction == end_tok_id:
                     # print(f"b: {b} is finished, shouldn't see it processed any more!")
                     new_id_inp.append(id_inp[b, :].numpy().tolist())  # no changes made here.
@@ -357,14 +358,15 @@ class NMTransformer(tf.keras.Model):
                 #nm_inp_np = nm_inp[b, :].numpy().tolist()  # 1D list (of integers).
                 new_input = None
                 if end:  # move all to the left once and append the prediction to the end.
-                    new_input = id_inp_np[1:] + [id_prediction]
+                    new_input = id_inp_np[:self.num_aux_toks] + id_inp_np[self.num_aux_toks+1:] + [id_prediction]
                 else:
                     if pred_index is not None:
                         # +1 becuase pred_index is the index we want to include up to, however rhs of : is not inclusive
                         # so add a 1 here to include this index, which represents the last non pad_id token...
                         # the lhs of : is inclusive so +2 is correct (instead of plus 3) as the difference is two between
                         # [id_prediction].
-                        new_input = id_inp_np[:pred_index+1] + [id_prediction] + id_inp_np[pred_index+2:]
+                        new_input = id_inp_np[:self.num_aux_toks+pred_index+1] + [id_prediction] + id_inp_np[self.num_aux_toks+pred_index+2:]
+                        #print(f"id_inp_np: {id_inp_np} \n new_input: {new_input}")
                     # else: # is handled below with first_pad_element.
 
                 if first_pad_element:  # also means pred_index will be None. handles one case above.
@@ -376,9 +378,10 @@ class NMTransformer(tf.keras.Model):
 
                 # print(f"new_input: {new_input}")
                 new_id_inp.append(new_input)
+                #print(f"b: {b}")
                 generated_ids[b].append(id_prediction)  # note: we continue above when reach end token...
 
-            outer_id_inp = new_dec_inp
+            outer_id_inp = new_id_inp
             #outer_nm_inp = new_nm_inp
 
             if len(generation_done) >= batch_size_: break  # we are done here.
@@ -391,7 +394,7 @@ class NMTransformer(tf.keras.Model):
         pred_index = None
         for i in range(1, id_inp.shape[1]):
             if id_inp[0, i] == pad_tok_id:
-                pred_index = i - 1  # we get the prediction at the previous token.
+                pred_index = i-1  # we get the prediction at the previous token.
                 break
         first_pad_element = False
         if id_inp[0, 0] == pad_tok_id: first_pad_element = True
@@ -413,6 +416,10 @@ class NMTransformer(tf.keras.Model):
             raise Exception(f"id_prediction is not of type int or list, got {type(id_prediction)}!")
 
         return id_prediction, pred_index, end, first_pad_element
+
+    def autoregressive_generation(self, tokenizer, input_sequence="sample input sequence", max_seq_length=100):
+        #tokenizer.encode_single_plus(input_sequence=)
+        tf.cast(tf.convert_to_tensor(input_string), dtype=tf.dtypes.string)
 
 
 if __name__ == "__main__":
