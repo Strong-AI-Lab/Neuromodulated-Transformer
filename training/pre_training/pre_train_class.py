@@ -59,16 +59,17 @@ class NMTransformerPreTrainDec(ParentTrainNL):
         with tf.GradientTape() as tape:
             vanilla_set_output, _, task_prediction, _, _ = self.model(inp_str, inp_id, training=True, mask=mask,
                                                                       reading_strat_mc_bool=False,
-                                                                      vanilla_set_aux_loss_bool=True,
-                                                                      fixed_output=True)
+                                                                      vanilla_set_aux_loss_bool=False,
+                                                                      fixed_output=True, fine_tuning=False,
+                                                                      stop_gradient=False)
             # ret (vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights)
             #vanilla_set_output is after it has been passed through dense layer...
 
             loss, size = self.loss_function(tar_id, task_prediction, self.loss_object, self.padding_id)
-            loss_aux, size_aux = self.loss_function(tar_id, vanilla_set_output, self.loss_object, self.padding_id)
+            #loss_aux, size_aux = self.loss_function(tar_id, vanilla_set_output, self.loss_object, self.padding_id)
             loss_ = loss / size
-            loss_aux_ = loss_aux / size_aux
-            loss_ = loss_ + (loss_aux_*lambda_)
+            #loss_aux_ = loss_aux / size_aux
+            #loss_ = loss_ + (loss_aux_*lambda_)
 
         gradients = tape.gradient(loss_, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))

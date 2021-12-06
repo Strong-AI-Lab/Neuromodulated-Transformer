@@ -38,7 +38,7 @@ class ParentFineTuningNL:
     def __init__(self, model, optimizer, loss_object, loss_function, tokenizer,
                  checkpoint_path_recent, strategy, pad_token="<pad>", end_tok="</s>",
                  recent_to_keep=5, load_recent=False, load_specific_path='',
-                 enc_tok_id=None, dec_tok_id=None, output_layer_name="lm"):
+                 enc_tok_id=None, dec_tok_id=None, output_layer_name="lm", fine_tuning=True):
 
         self.model = model
         self.optimizer = optimizer
@@ -48,6 +48,8 @@ class ParentFineTuningNL:
 
         self.checkpoint_path_recent = checkpoint_path_recent
         self.strategy = strategy
+
+        self.fine_tuning = fine_tuning
 
         self.padding_id = self.tokenizer.encode_single(pad_token)
         if len(self.padding_id) == 1:
@@ -81,6 +83,10 @@ class ParentFineTuningNL:
         if output_layer_name is not None:
             self.model.fixed_output_layer = self.model.output_layers[output_layer_name] # hardcoded for C4 pre-training
 
+        self.test2_counter = 0
+        self.correct_holder = 0
+        self.total_holder = 0
+
     def create_recent_checkpoint(self, keep):
         self.ckpt = tf.train.Checkpoint(model=self.model,
                                         optimizer=self.optimizer)
@@ -97,6 +103,7 @@ class ParentFineTuningNL:
     def train_step(self, input_string, input_id, label_id, aoint_indices, sample_weights, num_aux_tokens):
 
         mask = create_combined_mask(input_id, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
+        #mask = create_padding_mask(input_id, padding_id=self.padding_id)
 
         lambda_ = 0.25
 
@@ -105,7 +112,7 @@ class ParentFineTuningNL:
             vanilla_set_output, _, task_prediction, _, _ = self.model(input_string, input_id, training=True, mask=mask,
                                                                       reading_strat_mc_bool=False,
                                                                       vanilla_set_aux_loss_bool=False,
-                                                                      fixed_output=True, fine_tuning=True)
+                                                                      fixed_output=True, fine_tuning=self.fine_tuning)
             # ret (vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights)
             #vanilla_set_output is after it has been passed through dense layer...
 
@@ -195,6 +202,7 @@ class ParentFineTuningNL:
     def val_step(self, input_string, input_id, label_id, aoint_indices, sample_weights, num_aux_tokens):
 
         mask = create_combined_mask(input_id, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
+        #mask = create_padding_mask(input_id, padding_id=self.padding_id)
 
         lambda_ = 0.25
 
@@ -203,7 +211,7 @@ class ParentFineTuningNL:
             vanilla_set_output, _, task_prediction, _, _ = self.model(input_string, input_id, training=False, mask=mask,
                                                                       reading_strat_mc_bool=False,
                                                                       vanilla_set_aux_loss_bool=False,
-                                                                      fixed_output=True, fine_tuning=True)
+                                                                      fixed_output=True, fine_tuning=self.fine_tuning)
             # ret (vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights)
             #vanilla_set_output is after it has been passed through dense layer...
 
@@ -260,16 +268,18 @@ class ParentFineTuningNL:
 
         total_loss = epoch_loss_total / epoch_size_total
 
-        print(f'Validation Epoch {e+1}Loss {total_loss:.4f}')
+        print(f'Validation Epoch {e+1} Loss {total_loss:.4f}')
         print(f'Time taken for validation epoch {e+1}: {time.time() - start:.2f} secs\n')
 
         header = True if e == 0 else False
         self._save_epoch_loss_only("val", e+1, save_filepath_val, header, total_loss)
 
-    def test_step(self, input_string, input_id, all_labels, correct_ao, aoint_indices,
+
+    def test_step_generate(self, input_string, input_id, all_labels, correct_ao, aoint_indices,
                   num_aux_tokens, max_generate_len):
 
         mask = create_combined_mask(input_id, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
+        #mask = create_padding_mask(input_id, padding_id=self.padding_id)
 
         generated_ids = self.model.generate_answer(input_string, input_id, training=False, mask=mask,
                                                    reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
@@ -290,6 +300,145 @@ class ParentFineTuningNL:
         print(f"Batch accuracy: {correct / total}")
         # return loss_enc, size_enc, loss_dec, size_dec
         return correct, total
+
+    def test_step_label(self, input_string, input_id, all_labels, correct_ao, aoint_indices,
+                  num_aux_tokens, max_generate_len):
+
+        mask = create_combined_mask(input_id, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
+        #mask = create_padding_mask(input_id, padding_id=self.padding_id)
+
+        generated_ids = self.model.generate_answer(input_string, input_id, training=False, mask=mask,
+                                                   reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
+                                                   fixed_output=True, pad_tok_id=self.padding_id,
+                                                   end_tok_id=self.end_tok_id, gen_len_max=1)
+
+        convert_byte_to_string = lambda i: i.decode("utf-8")
+        correct_ao = [convert_byte_to_string(x) for x in correct_ao.numpy().tolist()]  # list of strings. # one for each batch item.
+
+        #print(f"all_labels: {all_labels} \n correct_ao: {correct_ao} \n generated_answer: {self.tokenizer.batch_decode(generated_ids)}")
+
+        correct, total = self._accuracy_helper_label(correct_ao, generated_ids) # for a fully generated answer.
+        #cor, tot = self._accuracy_helper2(correct_ao, generated_labels) # for a single label only...
+
+        print(f"Batch accuracy: {correct / total}")
+        # return loss_enc, size_enc, loss_dec, size_dec
+        return correct, total
+
+    def _accuracy_helper_label(self, cor_label, generated_ids):
+        #all_labels and cor_label are list of strings.
+        #all_labels
+        # generated_ids is a list of integers.
+        correct = 0
+        total = 0
+
+        for i, batch_item in enumerate(cor_label):
+            correct_ans = self.tokenizer.batch_encode([batch_item])["input_ids"][0] # list of integers.
+            #print(f"correct_ans \\t generated_ids: {correct_ans} \t {generated_ids[i]}")
+            if correct_ans[0] == generated_ids[i][0]:
+                correct += 1
+            total += 1
+        return correct, total
+
+    def test_step_average_prob(self, input_string, input_id, all_labels, correct_ao, aoint_indices,
+                  num_aux_tokens, max_generate_len):
+
+        assert input_id.shape[0] == 1, f"The batch size is required to be equal to 1, got {input_id.shape[0]}!"
+        convert_byte_to_string = lambda i: i.decode("utf-8")
+        #print(f"all_labels: {all_labels.numpy().tolist()}")
+        all_labels = [convert_byte_to_string(x) for x in all_labels.numpy().tolist()]  # list of strings.
+        correct_ao = [convert_byte_to_string(x) for x in correct_ao.numpy().tolist()]
+        #print(f"\n\n\ncorrect_ao: {correct_ao}")
+        all_labels_split = []
+        for batch_item in all_labels:
+            temp_list = re.split(r"\(\d\)", batch_item)  # batch item will be a string.
+            for i in range(len(temp_list) - 1, -1, -1):
+                if temp_list[i].strip() == "":
+                    temp_list.pop(i)
+                else:
+                    temp_list[i] = temp_list[i].strip()
+            # print(f"temp_list: {temp_list}")
+            all_labels_split.append(
+                temp_list)  # temp_list is a list where each item in the list corresponds to an answer option.
+
+        max_score = {"max_average_probs":-9999999,"max_index+1":0}
+        #print(f"all_labels: {all_labels}")
+        for i, label_ in enumerate(all_labels_split[0]):
+            #print(f"i:{i}")
+            label = self.tokenizer.encode_single(label_) # list of integers representing the ids...
+
+            input_id_ = tf.squeeze(input_id).numpy().tolist() # list of integers representing the ids...
+            #print(f"len input_id: {len(input_id)}")
+            #print(f"len of label: {len(label)}")
+            #print(f"input_id old: {input_id}")
+            new_input_id = list(filter((self.padding_id).__ne__, input_id_)) + label + [self.end_tok_id] # first part removes all padding tokens via their id.
+            #print(f"len input_id:_new {len(new_input_id)}")
+            #print(f"new_input_id1: {new_input_id}")
+            new_input_id = new_input_id + [self.padding_id for _ in range(self.model.max_seq_len_nm-len(new_input_id))] # add in padding tokens.
+            #print(f"new_input_id2: {new_input_id}")
+            if len(new_input_id) > self.model.max_seq_len_nm:
+                new_input_id = new_input_id[-self.model.max_seq_len_nm:] # for if the input with label is greater than the maximum sequence length.
+            #print(f"new_input_id3: {new_input_id}")
+            #print(f"length of new_input_id: {len(new_input_id)}")
+            input_id_ = tf.expand_dims(tf.cast(tf.convert_to_tensor(new_input_id), dtype=tf.dtypes.int64), axis=0) # expand_dims adds back the batch dimension.
+            #print(f"input_id new: {input_id.shape}")
+            mask = create_combined_mask(input_id_, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
+
+            _, _, task_prediction, _, _ = self.model(input_string, input_id_, training=False, mask=mask,
+                                                                      reading_strat_mc_bool=False,
+                                                                      vanilla_set_aux_loss_bool=False,
+                                                                      fixed_output=True, fine_tuning=False)
+
+            max_avg_prob = self._get_average_log_probs(tf.expand_dims(input_id_[0,-self.model.max_seq_len_dec:], axis=0), task_prediction)
+            if max_avg_prob>max_score["max_average_probs"]:
+                max_score["max_average_probs"] = max_avg_prob
+                max_score["max_index+1"] = i+1
+        correct, total = self._check_correct_helper(max_score["max_index+1"], correct_ao[0])
+        #print(f"correct/total: {correct/total}")
+        self._print_test2_helper(correct, total)
+        return correct, total
+
+    def _print_test2_helper(self, correct, total):
+        self.test2_counter += 1
+
+        self.correct_holder += correct
+        self.total_holder += total
+
+        if self.test2_counter == 16:
+            print(f"correct: {self.correct_holder}\ntotal: {self.total_holder}\n accuracy: "
+                  f"{self.correct_holder/self.total_holder}")
+            self.test2_counter = 0
+            self.correct_holder = 0
+            self.total_holder = 0
+
+    def _get_average_log_probs(self, input_id, task_prediction):
+        assert input_id.shape[1] == self.model.max_seq_len_dec and len(input_id.shape) == 2
+        sep_tok = "<sep>"
+        sep_tok_id = self.tokenizer.encode_single(sep_tok)[0]
+        assert len(task_prediction.shape) == 3
+        total_probs = 0
+        num_probs = 0
+        bool_ = False
+        #print(f"task_prediction.shape: {task_prediction.shape}")
+        #print(f"input_id: {input_id}")
+        for i in range(task_prediction.shape[1]):
+            if not bool_:
+                if input_id[0,i] == sep_tok_id:
+                    bool_ = True
+                    max_id = tf.argmax(task_prediction[0, i, :])
+                    #print(f"max_id: {max_id}")
+                    total_probs += tf.cast(task_prediction[0,i,max_id], dtype=tf.dtypes.float32)
+                    num_probs += 1
+                continue
+            else: # if bool_
+                if input_id[0,i] == self.end_tok_id or input_id[0,i] == self.padding_id: break
+                else:
+                    max_id = tf.argmax(task_prediction[0,i,:])
+                    #print(f"max_id: {max_id}")
+                    total_probs += tf.cast(task_prediction[0,i,max_id], dtype=tf.dtypes.float32)
+                    num_probs += 1
+        #print(f"total_probs/num_probs: {total_probs/num_probs}")
+        if num_probs != 0: return total_probs/num_probs
+        else: return 0
 
     def _accuracy_helper(self, all_labels, cor_label, generated_ids):
         # all_labels and cor_label are list of strings.
@@ -392,11 +541,11 @@ class ParentFineTuningNL:
             raise Exception(f"Invalid index value: {indice}!")
         return correct, total
 
-    def _distributed_test_step(self, input_string, input_id, all_labels, correct_ao, aoint_indices,
+    def _distributed_test_step_generate(self, input_string, input_id, all_labels, correct_ao, aoint_indices,
                                num_aux_tokens, max_generate_len):
         correct, total = None, None
         if self.strategy is not None:
-            correct, total = self.strategy.run(self.test_step, args=(
+            correct, total = self.strategy.run(self.test_step_generate, args=(
             input_string, input_id, all_labels, correct_ao, aoint_indices, num_aux_tokens, max_generate_len,))
 
             # The if else may be totally irrelevant.
@@ -407,25 +556,70 @@ class ParentFineTuningNL:
                 correct = tf.reduce_sum(correct)
                 total = tf.reduce_sum(total)
         else:
-            correct, total = self.test_step(input_string, input_id, all_labels, correct_ao, aoint_indices,
+            correct, total = self.test_step_generate(input_string, input_id, all_labels, correct_ao, aoint_indices,
+                                                num_aux_tokens, max_generate_len)
+
+        return correct, total
+
+    def _distributed_test_step_label(self, input_string, input_id, all_labels, correct_ao, aoint_indices,
+                               num_aux_tokens, max_generate_len):
+        correct, total = None, None
+        if self.strategy is not None:
+            correct, total = self.strategy.run(self.test_step_label, args=(
+            input_string, input_id, all_labels, correct_ao, aoint_indices, num_aux_tokens, max_generate_len,))
+
+            # The if else may be totally irrelevant.
+            if self.strategy.num_replicas_in_sync > 1:
+                correct = tf.reduce_sum(correct.values)
+                total = tf.reduce_sum(total.values)
+            else:
+                correct = tf.reduce_sum(correct)
+                total = tf.reduce_sum(total)
+        else:
+            correct, total = self.test_step_label(input_string, input_id, all_labels, correct_ao, aoint_indices,
+                                                num_aux_tokens, max_generate_len)
+
+        return correct, total
+
+    def _distributed_test_step_average_prob(self, input_string, input_id, all_labels, correct_ao, aoint_indices,
+                               num_aux_tokens, max_generate_len):
+        correct, total = None, None
+        if self.strategy is not None:
+            correct, total = self.strategy.run(self.test_step_average_prob, args=(
+            input_string, input_id, all_labels, correct_ao, aoint_indices, num_aux_tokens, max_generate_len,))
+
+            # The if else may be totally irrelevant.
+            if self.strategy.num_replicas_in_sync > 1:
+                correct = tf.reduce_sum(correct.values)
+                total = tf.reduce_sum(total.values)
+            else:
+                correct = tf.reduce_sum(correct)
+                total = tf.reduce_sum(total)
+        else:
+            correct, total = self.test_step_average_prob(input_string, input_id, all_labels, correct_ao, aoint_indices,
                                                 num_aux_tokens, max_generate_len)
 
         return correct, total
 
     def generate_answer_test(self, e, save_filepath, data, num_aux_tokens,
-                             max_generate_len=100, attn_strat="full_attn", filename_prefix="test"):  # greedy decoding.
-        # print(f"This generate_answer_test function gets the loss and accuracy on the data. \n"
-        #      f"The data's format should be (input_string (w/out teacher forcing), input_id (w/out teacher forcing), "
-        #      f"correct_ans(e.g. A or B...) in id format)")
-        # input should be (input_string(no correct ans), input_id(no correct ans), ans_options, correct_answer, )
+                             max_generate_len=100, attn_strat="full_attn", filename_prefix="test",
+                             test_step_type="generate"):
         start = time.time()
-
         correct_samples = 0  # get the number of correct answers to questions.
         total_samples = 0  # the total number of correct questions.
         for (input_string, input_id, all_labels, correct_ao, aoint_indices) in data:  # note: in all labels
 
-            correct, total = self._distributed_test_step(input_string, input_id, all_labels, correct_ao, aoint_indices,
-                                                         num_aux_tokens, max_generate_len)
+            if test_step_type == "generate":
+                correct, total = self._distributed_test_step_generate(input_string, input_id, all_labels, correct_ao, aoint_indices,
+                                                             num_aux_tokens, max_generate_len)
+            elif test_step_type == "label":
+                correct, total = self._distributed_test_step_label(input_string, input_id, all_labels, correct_ao, aoint_indices,
+                                                             num_aux_tokens, max_generate_len)
+            elif test_step_type == "average_prob":
+                correct, total = self._distributed_test_step_average_prob(input_string, input_id, all_labels, correct_ao, aoint_indices,
+                                                             num_aux_tokens, max_generate_len)
+            else: raise Exception(f"Invalid test_step_type parameter")
+
             correct_samples += correct
             total_samples += total
 

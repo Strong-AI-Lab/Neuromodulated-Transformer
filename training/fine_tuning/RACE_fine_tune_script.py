@@ -32,9 +32,9 @@ from load_datasets.question_answering.loadRACE import RACEDataLoader
 
 if __name__ == "__main__":
 
-    config = V4ConfigMediumSize(strategy="MirroredStrategy", batch_size=16*GPUS_AVAILABLE,
+    config = V4ConfigMediumSize(strategy="MirroredStrategy", batch_size=8*GPUS_AVAILABLE,
                                 loss_object=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False, reduction='none'),
-                                learning_rate=0.0001,
+                                learning_rate=0.00001,
                                 vocab_filepath="/data/kkno604/Neuromodulated-Transformer/vocabulary/vocab1.txt")
     strategy = config.strategy
 
@@ -70,7 +70,8 @@ if __name__ == "__main__":
                  "RACE_middle_val": "/large_data/RACE/dev/middle/"}
     dloader_train = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size, tokenizer=config.tokenizer)
     #generator = dloader_train.get_generator(type="C4_pretrain_dec", shuffle=False).batch(config.batch_size)
-    generator_train = dloader_train.get_generator("RACE_combined_train", False).batch(config.batch_size)
+    #generator_train = dloader_train.get_generator("RACE_combined_train", False).batch(config.batch_size)
+    generator_train = dloader_train.get_generator("RACE_combined_train_label", False).batch(config.batch_size)
 
     data_dict = {}
     data_dict["train"] = generator_train
@@ -79,22 +80,23 @@ if __name__ == "__main__":
 
     dloader_val = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size,
                                  tokenizer=config.tokenizer)
-    generator_val = dloader_val.get_generator("RACE_combined_val", False).batch(config.batch_size)
+    #generator_val = dloader_val.get_generator("RACE_combined_val", False).batch(config.batch_size)
+    generator_val = dloader_val.get_generator("RACE_combined_val_label", False).batch(config.batch_size)
 
     data_dict["val"] = generator_val
     if strategy is not None:
         data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
 
     train_class = ParentFineTuningNL(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
-                                           checkpoint_path_recent="/home/kkno604/Documents/V4 NMT Results/finetuning/RACE/Checkpoints/",
-                                           strategy=strategy, pad_token="<pad>", recent_to_keep=7, load_recent=True,
+                                           checkpoint_path_recent="/data/kkno604/NMTransformer_fine_tuning/RACE/Checkpoints/no_freeze_label_only/",
+                                           strategy=strategy, pad_token="<pad>", recent_to_keep=10, load_recent=True,
                                            load_specific_path="",
                                            enc_tok_id=config.tokenizer.encode_single("<enc>")[0],
                                            dec_tok_id=config.tokenizer.encode_single("<dec>")[0],
-                                           output_layer_name="mqa")
+                                           output_layer_name="lm", fine_tuning=False)
 
-    train_class.train_batch(epoch_start=5, epoch_end=7, iteration_counter=0,
-                            save_filepath_train="/home/kkno604/Documents/V4 NMT Results/finetuning/RACE/Results/",
-                            save_filepath_val="/home/kkno604/Documents/V4 NMT Results/finetuning/RACE/Results/",
+    train_class.train_batch(epoch_start=22, epoch_end=30, iteration_counter=0,
+                            save_filepath_train="/data/kkno604/NMTransformer_fine_tuning/RACE/Results/no_freeze_label_only/",
+                            save_filepath_val="/data/kkno604/NMTransformer_fine_tuning/RACE/Results/no_freeze_label_only/",
                             data_dict=data_dict, num_aux_tokens=config.num_aux_toks, save_end_epoch=True,
-                            print_every_iterations=100, save_every_iterations=5000)
+                            print_every_iterations=100, save_every_iterations=1000000000)

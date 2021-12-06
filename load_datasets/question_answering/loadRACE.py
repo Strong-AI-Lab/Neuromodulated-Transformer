@@ -603,7 +603,7 @@ class RACEDataLoader:
         #mode default_generate and test_generate is where the whole answer is generated (of a specific label).
         #mode default_label and test_label is where only the label is generated
         # test_generate, test_label are redundant as they aren't included anyway.
-        assert mode in ["default_generate","test"] # note need to update with label variants when they are implemented.
+        assert mode in ["default_generate", "default_label", "test"] # note need to update with label variants when they are implemented.
         random.shuffle(self.filenames) # randomly shuffle the list each epoch.
         if mode == "default_generate":
             for item in self.filenames:
@@ -678,6 +678,82 @@ class RACEDataLoader:
                     yield input_string, input_id, label_, [start_index, end_index], \
                           sample_weights, self.dec_tok_id, self.mqa_tok_id
             yield None, None, None, None, None, None, None
+        elif mode == "default_label":
+            for item in self.filenames:
+                self.process_file(self.filepath+item)
+
+                for i, label in enumerate(self.answer_char):
+
+                    input_ = ''
+                    passage = self.race_passage
+                    input_ += " " + self.p1 + " " + passage
+                    input_ += " " + self.question + " " + self.passage_questions[i]
+                    correct_ao = '' # the whole label's item, not the individual label
+                    for j, answer_option in enumerate(self.answer_options[i]):
+                        if j == 0:
+                            input_ += " " + self.a1 + " " + answer_option
+                            if self.a1 == label: correct_ao = self.a1
+                        elif j == 1:
+                            input_ += " " + self.a2 + " " + answer_option
+                            if self.a2 == label: correct_ao = self.a2
+                        elif j == 2:
+                            input_ += " " + self.a3 + " " + answer_option
+                            if self.a3 == label: correct_ao = self.a3
+                        elif j == 3:
+                            input_ += " " + self.a4 + " " + answer_option
+                            if self.a4 == label: correct_ao = self.a4
+                        elif j == 4:
+                            input_ += " " + self.a5 + " " + answer_option
+                            if self.a5 == label: correct_ao = self.a5
+                        elif j == 5:
+                            input_ += " " + self.a6 + " " + answer_option
+                            if self.a6 == label: correct_ao = self.a6
+                        elif j == 6:
+                            input_ += " " + self.a7 + " " + answer_option
+                            if self.a7 == label: correct_ao = self.a7
+                        elif j == 7:
+                            input_ += " " + self.a8 + " " + answer_option
+                            if self.a8 == label: correct_ao = self.a8
+                        elif j == 8:
+                            input_ += " " + self.a9 + " " + answer_option
+                            if self.a9 == label: correct_ao = self.a9
+                        else: raise Exception(f"Too many answer options than what is supported (more than 9)")
+
+                    # Dont' want this as it is pointless, the prediction is being made at <sep> token - can't cheat anyway with look ahead padding.
+                    input_ += " " + self.sep_tok#self.end_tok
+                    #correct_label = answer_option + " " + self.end_tok
+                    correct_label = correct_ao + " " #+ self.end_tok
+                    #input_label = input_ + " " + correct_label
+
+                    data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(input_, max_seq_len=10000000) # [0] is ids [1] is string version...
+                    label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(correct_label, max_seq_len=1000000)
+
+                    start_index = data_id_string[0].index(self.a1_tok_id) # there is only one match, so .index is sufficient.
+                    end_index = len(data_id_string[0])-1 # this doesn't include the correct answer option, but does include </s> token at the end.
+
+                    if len(data_id_string[1]) > self.seq_len: # handles if there is overflow. compress some of the passage.
+                        #note: if >= above, then case when they are equal causes the first element to be doubled twice...
+                        #> is ok as the first element will never be reached, hence ok to add back in as done below.
+                        input_string = [data_id_string[1][0]] + data_id_string[1][-(self.seq_len-1):] # if overflow then remove parts of the passage
+                    else: input_string = data_id_string[1]
+
+                    if len(data_id_string[0]) > self.seq_len: # handles overflow.
+                        input_id = [data_id_string[0][0]] + data_id_string[0][-(self.seq_len-1):]  # if overflow then remove parts of the passage
+                    else: input_id = data_id_string[0]
+                    #print(f"Length of input_id: {len(input_id)}")
+
+                    label_ = [self.pad_tok_id for i in range(len(input_id)-len(label_data_id_string[0]))] + label_data_id_string[0] #+ [self.pad_tok_id]
+                    #         [blah, blah, ..., </s> correct_ao_1, correct_ao_2, </s>]
+                    # [<pad>, <pad>, ..., <pad>, correct_ao_1, correct_ao_2, </s>, <pad>]
+                    #print(f"input_id: {input_id}\nlabel: {label_}")
+                    assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
+                                                         f"of the input id ({len(input_id)})"
+                    sample_weights = [1] # A placeholder for if it is needed layer on...
+                    #print(f"input_string: {input_string}")
+                    #print(f"input_id: {input_id} \nlabel_: {label_}")
+                    yield input_string, input_id, label_, [start_index, end_index], \
+                          sample_weights, self.dec_tok_id, self.mqa_tok_id
+            yield None, None, None, None, None, None, None
         elif mode == "test":
             for item in self.filenames:
                 self.process_file(self.filepath+item)
@@ -745,7 +821,7 @@ class RACEDataLoader:
                     if len(data_id_string[0]) > self.seq_len: # handles overflow.
                         input_id = [data_id_string[0][0]] + (data_id_string[0])[-(self.seq_len-1):]  # if overflow then remove parts of the passage
                     else: input_id = data_id_string[0]
-
+                    #print(f"len_data_id: {len(data_id_string[0])}")
                     #sample_weights = [1] # A placeholder for if it is needed layer on...
 
                     # all_labels is a string of all answer options one after another.

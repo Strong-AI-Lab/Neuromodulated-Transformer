@@ -113,11 +113,12 @@ class NMTransformer(tf.keras.Model):
         self.dropout = tf.keras.layers.Dropout(rate=rate, input_shape=(d_model,))
         self.pos_encoding = positional_encoding(max_position_encoding, d_model)
 
+        self.layernorm = tf.keras.layers.LayerNormalization(epsilon=1e-6, input_shape=(d_model,))
         self.final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,))
         self.vanilla_set_final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,))
 
     def call(self, str_inp, id_inp, training, mask, reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
-             fixed_output=False, fine_tuning=False):
+             fixed_output=False, fine_tuning=False, stop_gradient=True):
         '''
         Description: One run through the NMTransformer that generates an output based on the prediction.
         :param str_inp: (tf.Tenor{tf.dtypes.string}; [batch_size, max_seq_len_nm (nothing actually enforces this)])
@@ -148,7 +149,7 @@ class NMTransformer(tf.keras.Model):
 
         if not reading_strat_mc_bool:
             if not fine_tuning:
-                task_prediction, attention_weights, vanilla_set_output, gating_weights = self.run_no_rs(id_inp, training, mask, fixed_output)
+                task_prediction, attention_weights, vanilla_set_output, gating_weights = self.run_no_rs(id_inp, training, mask, fixed_output, stop_gradient)
             else:
                 task_prediction, attention_weights, vanilla_set_output, gating_weights = self.run_no_rs_fine_tune(id_inp, training, mask, fixed_output)
             if vanilla_set_aux_loss_bool:
@@ -208,12 +209,12 @@ class NMTransformer(tf.keras.Model):
         attention_weights["mc_output_attention_weightse"] = mc_output_dict
         attention_weights["output_attention_weights"] = attn_weights_output
 
-        output_ = tf.nn.softmax(self.final_layer(output_), axis=-1) # (batch_size, max_seq_len_dec, target_vocab_size)
+        output_ = tf.nn.softmax(self.final_layer(self.layernorm(output_)), axis=-1) # (batch_size, max_seq_len_dec, target_vocab_size)
         #task_prediction, attention_weights, vanilla_set_output, gating_weights
         return output_, attention_weights, vanilla_output, gating_weights
 
 
-    def run_no_rs(self, id_inp, training, mask, fixed_output):
+    def run_no_rs(self, id_inp, training, mask, fixed_output, stop_gradient):
         mode_id = tf.stop_gradient(id_inp[0, 2])  # first batch item and the (third) item in the sequence. <cls> <dec> <lm> ...
         ## NOTE (important): that in a batch only one mode_id is supported.
 
@@ -231,7 +232,11 @@ class NMTransformer(tf.keras.Model):
         # vanilla_output.shape = (batch_size, max_seq_len_dec, d_model)
 
         # don't want the vanilla_output gradient flowing back through the nm_inp
-        nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], tf.stop_gradient(vanilla_output)], axis=1)
+        #Below has had stop_gradient commented out...
+        if stop_gradient: #== True
+            nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], tf.stop_gradient(vanilla_output)], axis=1)
+        else: # == False
+            nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], vanilla_output], axis=1)
         # nm_inp.shape = (batch_size, max_seq_len_nm, d_model)
 
         # below has been removed as there is no reason to apply it twice.
@@ -253,7 +258,7 @@ class NMTransformer(tf.keras.Model):
         attention_weights["mc_output_attention_weightse"] = mc_output_dict
         attention_weights["output_attention_weights"] = attn_weights_output
 
-        output_ = tf.nn.softmax(self.final_layer(output_), axis=-1) # (batch_size, max_seq_len_dec, target_vocab_size)
+        output_ = tf.nn.softmax(self.final_layer(self.layernorm(output_)), axis=-1) # (batch_size, max_seq_len_dec, target_vocab_size)
         #task_prediction, attention_weights, vanilla_set_output, gating_weights
         return output_, attention_weights, vanilla_output, gating_weights
 

@@ -453,19 +453,26 @@ class MasterDataLoaderTF(object):
             if break_: break
 
     def _combined_race_helper(self):
-        if self.type == "RACE_combined_train":
-            assert ("RACE_middle_train" in self.dataLoaders.keys() and "RACE_high_train" in self.dataLoaders.keys()) or \
-                   ("RACE_middle_train_label" in self.dataLoaders.keys() and "RACE_high_train_label" in self.dataLoaders.keys()), \
-                    f"One of RACE_middle_train and/or RACE_high_train is not in the dataLoaders dictionary of dataloaders!" \
-                    f"Or alternatively the updated _label at the end of the already mentioned keys."
-            key1 = "RACE_middle_train" if "RACE_middle_train" in self.dataLoaders.keys() else "RACE_middle_train_label"
-            key2 = "RACE_high_train" if "RACE_high_train" in self.dataLoaders.keys() else "RACE_high_train_label"
+        if self.type == "RACE_combined_train" or self.type == "RACE_combined_train_label":
+            assert ("RACE_middle_train" in self.dataLoaders.keys() and "RACE_high_train" in self.dataLoaders.keys()), \
+                    f"One of RACE_middle_train and/or RACE_high_train is not in the dataLoaders dictionary of dataloaders!"
+            #key1 = "RACE_middle_train" if "RACE_middle_train" in self.dataLoaders.keys() else "RACE_middle_train_label"
+            #key2 = "RACE_high_train" if "RACE_high_train" in self.dataLoaders.keys() else "RACE_high_train_label"
             # print(key1)
             # print(key2)
 
             # depending on the key names
             gen1 = None
             gen2 = None
+
+            if self.type == "RACE_combined_train":
+                gen1 = self.dataLoaders["RACE_middle_train"](mode="default_generate")
+                gen2 = self.dataLoaders["RACE_high_train"](mode="default_generate")
+            else: # RACE_combined_train_label
+                gen1 = self.dataLoaders["RACE_middle_train"](mode="default_label")
+                gen2 = self.dataLoaders["RACE_high_train"](mode="default_label")
+
+            '''
             if key1 == "RACE_middle_train":
                 gen1 = self.dataLoaders["RACE_middle_train"](mode="default_generate")
             else:
@@ -474,6 +481,7 @@ class MasterDataLoaderTF(object):
                 gen2 = self.dataLoaders["RACE_high_train"](mode="default_generate")
             else:
                 gen2 = self.dataLoaders["RACE_high_train_label"](mode="default_label")
+            '''
 
             stop_gen1 = False
             stop_gen2 = False
@@ -513,18 +521,24 @@ class MasterDataLoaderTF(object):
                 # print(input_string, input_id, label, aux_tok_1, aux_tok_2)
                 yield input_string, input_id, label, aoint_indices, sample_weights, aux_tok_1, aux_tok_2
 
-        elif self.type == "RACE_combined_val":
-            assert ("RACE_middle_val" in self.dataLoaders.keys() and "RACE_high_val" in self.dataLoaders.keys()) or \
-                   (
-                               "RACE_middle_val_label" in self.dataLoaders.keys() and "RACE_high_val_label" in self.dataLoaders.keys()), \
-                f"One of RACE_middle_val and/or RACE_high_val is not in the dataLoaders dictionary of dataloaders!" \
-                f"Or alternatively the updated _label at the end of the already mentioned keys."
-            key1 = "RACE_middle_val" if "RACE_middle_val" in self.dataLoaders.keys() else "RACE_middle_val_label"
-            key2 = "RACE_high_val" if "RACE_high_val" in self.dataLoaders.keys() else "RACE_high_val_label"
+        elif self.type == "RACE_combined_val" or self.type == "RACE_combined_val_label":
+            assert ("RACE_middle_val" in self.dataLoaders.keys() and "RACE_high_val" in self.dataLoaders.keys()), \
+                f"One of RACE_middle_val and/or RACE_high_val is not in the dataLoaders dictionary of dataloaders!"
+            #key1 = "RACE_middle_val" if "RACE_middle_val" in self.dataLoaders.keys() else "RACE_middle_val_label"
+            #key2 = "RACE_high_val" if "RACE_high_val" in self.dataLoaders.keys() else "RACE_high_val_label"
 
             # depending on the key names
             gen1 = None
             gen2 = None
+
+            if self.type == "RACE_combined_val":
+                gen1 = self.dataLoaders["RACE_middle_val"](mode="default_generate")
+                gen2 = self.dataLoaders["RACE_high_val"](mode="default_generate")
+            else: # RACE_combined_train_label
+                gen1 = self.dataLoaders["RACE_middle_val"](mode="default_label")
+                gen2 = self.dataLoaders["RACE_high_val"](mode="default_label")
+
+            '''
             if key1 == "RACE_middle_val":
                 gen1 = self.dataLoaders["RACE_middle_val"](mode="default_generate")
             else:
@@ -533,6 +547,7 @@ class MasterDataLoaderTF(object):
                 gen2 = self.dataLoaders["RACE_high_val"](mode="default_generate") #TODO: error here gen1 was here, which is obviously incorrect.
             else:
                 gen2 = self.dataLoaders["RACE_high_val_label"](mode="default_label")
+            '''
 
             stop_gen1 = False
             stop_gen2 = False
@@ -583,6 +598,10 @@ class MasterDataLoaderTF(object):
         elif self.type in ["RACE_middle_test", "RACE_high_test"]:
             mini_generator = self.dataLoaders[self.type](mode="test")
             mode_ = "test"
+        elif self.type in ["RACE_middle_train_label", "RACE_middle_val_label", "RACE_high_train_label",
+                           "RACE_high_val_label"]:
+            mini_generator = self.dataLoaders[self.type](mode="default_label")
+            mode_ = "default_label"
         else: # type == RACE_combined_train, RACE_combined_val, RACE_combined_test or label version.
             mini_generator = self._combined_race_helper()
             if self.type == "RACE_combined_val" or self.type == "RACE_combined_val_label":
@@ -599,6 +618,8 @@ class MasterDataLoaderTF(object):
                     mode_ = "default_generate"
                 else:
                     mode_ = "default_label"
+            elif self.type == "RACE_combined_test":
+                raise Exception(f"Not implemented yet!")
         if mode_ == "default_generate":
             while True:
                 break_ = False
@@ -632,7 +653,7 @@ class MasterDataLoaderTF(object):
                 sample_weights = tf.cast(tf.convert_to_tensor(sample_weights), dtype=tf.dtypes.int64)
 
                 yield input_string, input_id, label_id, aoint_indices, sample_weights
-        elif mode_ == "default_label": raise Exception("Not implemented yet (default_label)")
+        elif mode_ == "default_label": raise Exception("Not implemented yet (default_label)") #TODO
         elif mode_ == "test":
             while True:
                 break_ = False
@@ -693,7 +714,9 @@ class MasterDataLoaderTF(object):
                                                                      tf.dtypes.int64, # max_seq_len_nm
                                                                      tf.dtypes.int64)) # max_seq_len_dec
         elif type == "RACE_middle_train" or type == "RACE_middle_val" or \
-                type == "RACE_high_train" or type == "RACE_high_val":
+                type == "RACE_high_train" or type == "RACE_high_val" or \
+                type == "RACE_middle_train_label" or type == "RACE_middle_val_label" or \
+                type == "RACE_high_train_label" or type == "RACE_high_val_label":
             generator = tf.data.Dataset.from_generator(self.get_race_dataloader,
                                                        output_types=(tf.dtypes.string,
                                                                      tf.dtypes.int64,
@@ -707,7 +730,8 @@ class MasterDataLoaderTF(object):
                                                                      tf.dtypes.string,
                                                                      tf.dtypes.string,
                                                                      tf.dtypes.int64))
-        elif type == "RACE_combined_train" or type == "RACE_combined_val":
+        elif type == "RACE_combined_train" or type == "RACE_combined_val" or \
+                type == "RACE_combined_train_label" or type == "RACE_combined_val_label":
             generator = tf.data.Dataset.from_generator(self.get_race_dataloader,
                                                        output_types=(tf.dtypes.string,
                                                                      tf.dtypes.int64,
@@ -738,7 +762,7 @@ if __name__ == "__main__":
 
 
     #generator = dloader.get_generator(type="C4_pretrain_dec", shuffle=False).batch(1)
-    generator = dloader.get_generator("RACE_combined_train", False).batch(2)
+    generator = dloader.get_generator("RACE_combined_val_label", False).batch(2)
 
     batch_ = 1
     for (input_string, input_id, label_id, aoint_indices, sample_weights) in generator:

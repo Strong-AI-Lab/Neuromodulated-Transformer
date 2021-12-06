@@ -9,7 +9,8 @@ def init_vanilla_ffn(d_model: int, dff: int):
     :return: (tf.keras.Sequential)
     '''
     return tf.keras.Sequential([
-        tf.keras.layers.Dense(dff, activation='relu', input_shape=(d_model,)),
+        #tf.keras.layers.Dense(dff, activation='relu', input_shape=(d_model,)),
+        tf.keras.layers.Dense(dff, activation='gelu', input_shape=(d_model,)),
         tf.keras.layers.Dense(d_model, activation=None, input_shape=(dff,))
     ])
 

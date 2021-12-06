@@ -3,7 +3,7 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 GPUS_AVAILABLE = 1
 
 import sys
@@ -37,7 +37,7 @@ if __name__ == "__main__":
                                 learning_rate=0.0001,
                                 vocab_filepath="/data/kkno604/Neuromodulated-Transformer/vocabulary/vocab1.txt")
     strategy = config.strategy
-
+    #strategy = None
     transformer, optimizer = None, None
     if strategy is not None:
         with strategy.scope():
@@ -68,8 +68,8 @@ if __name__ == "__main__":
                  "RACE_middle_test": "/large_data/RACE/test/middle/"}
     dloader_test = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size, tokenizer=config.tokenizer)
     #generator = dloader_train.get_generator(type="C4_pretrain_dec", shuffle=False).batch(config.batch_size)
-    generator_test = dloader_test.get_generator("RACE_middle_test", False).batch(config.batch_size)
-    #generator_test = dloader_test.get_generator("RACE_high_test", False).batch(config.batch_size)
+    #generator_test = dloader_test.get_generator("RACE_middle_test", False).batch(config.batch_size)
+    generator_test = dloader_test.get_generator("RACE_high_test", False).batch(config.batch_size)
 
     data_dict = {}
     data_dict["test"] = generator_test
@@ -79,11 +79,13 @@ if __name__ == "__main__":
     train_class = ParentFineTuningNL(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
                                            checkpoint_path_recent="/data/kkno604/NMTransformer_fine_tuning/RACE/Checkpoints2/",
                                            strategy=strategy, pad_token="<pad>", recent_to_keep=5, load_recent=False,
-                                           load_specific_path="/data/kkno604/NMTransformer_fine_tuning/RACE/Checkpoints/ckpt-177",
+                                           load_specific_path="/data/kkno604/NMTransformer_fine_tuning/RACE/Checkpoints/no_freeze_label_only/ckpt-204",
                                            enc_tok_id=config.tokenizer.encode_single("<enc>")[0],
                                            dec_tok_id=config.tokenizer.encode_single("<dec>")[0],
-                                           output_layer_name="mqa")
+                                           output_layer_name="lm", fine_tuning=False)
+    #TODO remember "lm" and "mqa" to switch between the two.
 
-    train_class.generate_answer_test(e=0, save_filepath="/data/kkno604/NMTransformer_fine_tuning/RACE/Accuracy_results/",
+    train_class.generate_answer_test(e=0, save_filepath="/home/kkno604/Documents/V4 NMT Results/finetuning/RACE/Accuracy_results/",
                                      data=data_dict["test"], num_aux_tokens=config.num_aux_toks,
-                                     max_generate_len=50, attn_strat="full_attn", filename_prefix="test_epoch3")
+                                     max_generate_len=1, attn_strat="full_attn", filename_prefix="test_label_no_freeze_ckpt_204",
+                                     test_step_type="label")
