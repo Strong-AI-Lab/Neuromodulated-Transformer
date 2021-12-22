@@ -51,6 +51,7 @@ class NMTransformerPreTrainDec(ParentTrainNL):
 
     def train_step(self, inp_str, inp_id, tar_id, num_aux_tokens):
 
+        gpt_pad_mask = create_padding_mask_gpt(inp_id, padding_id=self.padding_id) # look ahead padding is handled by huggingface gpt2 model.
         mask = create_combined_mask(inp_id, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
 
         lambda_ = 0.25
@@ -58,10 +59,10 @@ class NMTransformerPreTrainDec(ParentTrainNL):
         loss, size = 0, 0
         with tf.GradientTape() as tape:
             vanilla_set_output, _, task_prediction, _, _ = self.model(inp_str, inp_id, training=True, mask=mask,
+                                                                      gpt_pad_mask=gpt_pad_mask,
                                                                       reading_strat_mc_bool=False,
                                                                       vanilla_set_aux_loss_bool=False,
-                                                                      fixed_output=True, fine_tuning=False,
-                                                                      stop_gradient=False)
+                                                                      fixed_output=True, stop_gradient=False)
             # ret (vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights)
             #vanilla_set_output is after it has been passed through dense layer...
 
@@ -73,9 +74,6 @@ class NMTransformerPreTrainDec(ParentTrainNL):
 
         gradients = tape.gradient(loss_, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
-
-        #gradients2 = tape.gradient(loss_aux_*lambda_, self.trainable_variables)
-        #self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
         return loss, size
 

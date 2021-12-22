@@ -4,8 +4,7 @@ import numpy as np
 import sys
 sys.path.append("..")
 
-from transformers import TransfoXLTokenizer
-from transformers import BertTokenizer
+from transformers import TransfoXLTokenizer, BertTokenizer, GPT2Tokenizer
 from text_processing.tokenizer import Tokenizer
 import json
 
@@ -16,7 +15,9 @@ class V4ConfigMediumSize(object):
                  highlighting_rs="<highlighting_rs>",
                  summarize_rs="<summarize_rs>",
                  paraphrase_rs="<paraphrase_rs>",
-                 vocab_filepath="../vocabulary/vocab1.txt"):
+                 vocab_filepath="../vocabulary/vocab1.txt",
+                 tokenizer="bert-base-uncased",
+                 gpt2_117=True):
 
         self.lm_tok = lm_tok
         self.mqa_tok = mqa_tok
@@ -24,6 +25,8 @@ class V4ConfigMediumSize(object):
         self.highlighting_rs = highlighting_rs
         self.summarize_rs = summarize_rs
         self.paraphrase_rs = paraphrase_rs
+
+        self.gpt2_117 = gpt2_117
 
         self.strategy = None
         if strategy is not None:
@@ -55,7 +58,13 @@ class V4ConfigMediumSize(object):
         self.num_heads = 12
         self.dff = self.d_model*4
 
-        tok = BertTokenizer.from_pretrained('bert-base-uncased')
+        if tokenizer == "bert-base-uncased":
+            tok = BertTokenizer.from_pretrained('bert-base-uncased')
+        elif tokenizer == "gpt2":
+            tok = GPT2Tokenizer.from_pretrained('gpt2')
+        elif tokenizer == "tf-xl":
+            raise Exception(f"Not implemented yet!")
+        else: raise Exception(f"Invalid tokenizer input")
         self.tokenizer = Tokenizer(tok)
         vocab_to_add = None
         with open(vocab_filepath, "r") as f:

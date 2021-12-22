@@ -14,6 +14,8 @@ from models.MultiHeadAttention import MultiHeadAttention
 from models.FeedForwardNetwork import *
 from models.config_model import *
 
+from transformers import TFGPT2Model, TFSharedEmbeddings
+
 class NMTransformer(tf.keras.Model):
     '''
     An implementation of version 4 of the neuromodulated transformer with reading strategy/metacognition support.
@@ -23,7 +25,7 @@ class NMTransformer(tf.keras.Model):
                  d_model, num_heads, dff, input_vocab_size, output_vocab_size, max_position_encoding=10000,
                  max_seq_len_dec=768, num_aux_toks=9, mask_strategy="default",
                  rate=0.1, parallel_layers=None, output_layers=None,
-                 aux_tok_output_layer_map={}, mode_ids={}):
+                 aux_tok_output_layer_map={}, mode_ids={}, gpt2_117=False):
         '''
         :param num_layers_vanilla: (int) An integer representing the number of layers in the "vanilla set".
         :param num_layers_nm: (int) An integer representing the number of layers in the "neuormodulation set".
@@ -102,23 +104,51 @@ class NMTransformer(tf.keras.Model):
                                                     rate=rate, name=key)
 
         # the first set of layers.
-        self.vanilla_set = Decoder(num_layers_vanilla, d_model, num_heads, dff, max_seq_len=max_seq_len_dec,
-                              mask_strategy=mask_strategy, rate=rate)
+        self.gpt2_bool = False
+        self.vanilla_set = None
+        if not gpt2_117:
+            self.vanilla_set = Decoder(num_layers_vanilla, d_model, num_heads, dff, max_seq_len=max_seq_len_dec,
+                                  mask_strategy=mask_strategy, rate=rate)
+        else:
+            self.gpt2_bool = True
+            self.vanilla_set = TFGPT2Model.from_pretrained('gpt2') # this is small -- actually 124 million parameters...
+
+            old_embeddings_weights = self.vanilla_set.transformer.wte.weights[0] # old vocab_size weights
+            assert input_vocab_size >= old_embeddings_weights[0].shape[0]
+            #print(f"\n\n\n\nold_embedding_weights_vocab_size: {old_embeddings_weights.shape[0]}\n\n\n\n")
+            self.vanilla_set.transformer.wte = TFSharedEmbeddings(input_vocab_size, d_model,
+                                                                  initializer_range=0.02, # hardcoded.
+                                                                  name="wte") # we want our to add our own tokens to the embedding layer. This is done below.
+            # manually build it here.
+            self.vanilla_set.transformer.wte(1)
+            #print(f"\n\n\n\nself.vanilla_set.transformer.wte: {self.vanilla_set.transformer.wte.weights[0].shape[0]}\n\n\n\n")
+            # below updates the weights to our new vocabulary.
+            self.vanilla_set.transformer.wte.set_weights([tf.concat([old_embeddings_weights,
+                                                                            self.vanilla_set.transformer.wte.weights[0][old_embeddings_weights.shape[0]:, :]],
+                                                                                                       axis=0)])
+
+            # The bare GPT2 Model transformer outputting raw hidden-states without any specific head on top.
+            # note: that the only mask to be applied here is a padding mask... where a 1 means we don't pad/mask.
+            # This is the opposite to how we have done it where a 1 means we do mask/pad because it is multipled by a very large negative value.
 
         # the second set of layers.
         self.nm_set = NMDecoder(num_layers_nm, num_layers_mc, d_model, num_heads, dff, max_seq_len=self.max_seq_len_nm,
                  mask_strategy=mask_strategy, rate=rate, parallel_layers=self.parallel_layers)
 
         self.embedding = tf.keras.layers.Embedding(input_vocab_size, d_model)
+        # quickly build so below assertion works.
+        self.embedding(1)
+
+        if gpt2_117: assert self.embedding.weights[0].shape == self.vanilla_set.transformer.wte.weights[0].shape
+
         self.dropout = tf.keras.layers.Dropout(rate=rate, input_shape=(d_model,))
         self.pos_encoding = positional_encoding(max_position_encoding, d_model)
 
-        self.layernorm = tf.keras.layers.LayerNormalization(epsilon=1e-6, input_shape=(d_model,))
-        self.final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,))
-        self.vanilla_set_final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,))
+        self.final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01))
+        self.vanilla_set_final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01))
 
-    def call(self, str_inp, id_inp, training, mask, reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
-             fixed_output=False, fine_tuning=False, stop_gradient=True):
+    def call(self, str_inp, id_inp, training, mask, gpt_pad_mask=None, reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
+             fixed_output=False, stop_gradient=True):
         '''
         Description: One run through the NMTransformer that generates an output based on the prediction.
         :param str_inp: (tf.Tenor{tf.dtypes.string}; [batch_size, max_seq_len_nm (nothing actually enforces this)])
@@ -148,10 +178,9 @@ class NMTransformer(tf.keras.Model):
         attention_weights = {}
 
         if not reading_strat_mc_bool:
-            if not fine_tuning:
-                task_prediction, attention_weights, vanilla_set_output, gating_weights = self.run_no_rs(id_inp, training, mask, fixed_output, stop_gradient)
-            else:
-                task_prediction, attention_weights, vanilla_set_output, gating_weights = self.run_no_rs_fine_tune(id_inp, training, mask, fixed_output)
+            task_prediction, attention_weights, vanilla_set_output, gating_weights = self.run_no_rs(id_inp, training,
+                                                                                                    mask, gpt_pad_mask,
+                                                                                                    fixed_output, stop_gradient)
             if vanilla_set_aux_loss_bool:
                 vanilla_set_output = tf.nn.softmax(self.vanilla_set_final_layer(vanilla_set_output), axis=-1)
                 # (batch_size, max_seq_len_dec, target_vocab_size)
@@ -169,12 +198,15 @@ class NMTransformer(tf.keras.Model):
         x /= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))  # re-normalize the input embeddings.
         return self.dropout(x, training=training)
 
-    def run_no_rs_fine_tune(self, id_inp, training, mask, fixed_output):
+    def run_no_rs(self, id_inp, training, mask, gpt_pad_mask, fixed_output, stop_gradient):
+        id_orig = id_inp
         mode_id = tf.stop_gradient(id_inp[0, 2])  # first batch item and the (third) item in the sequence. <cls> <dec> <lm> ...
         ## NOTE (important): that in a batch only one mode_id is supported.
 
+        # note: if using gpt2 then embedding doesn't utilize non auxiliary tokens.
         id_inp = self.embedding(id_inp)  # (batch_size, max_seq_len_nm, d_model)
-        id_inp = self._pos_encoding_helper(id_inp, training, self.max_seq_len_nm)
+        # don't need positional information for aux toks, while this is handled by the gpt2 model.
+        if not self.gpt2_bool: id_inp = self._pos_encoding_helper(id_inp, training, self.max_seq_len_nm)
 
         attention_weights = {}
         if mask.shape[-2] == 1:
@@ -182,58 +214,21 @@ class NMTransformer(tf.keras.Model):
         else:
             vanilla_mask = mask[:, :, -self.max_seq_len_dec:, -self.max_seq_len_dec:]
 
-        vanilla_output, attn_weights_vanilla = self.vanilla_set_run(id_inp[:, -self.max_seq_len_dec:, :], training,
-                                                                    vanilla_mask)
-        # vanilla_output.shape = (batch_size, max_seq_len_dec, d_model)
-        vanilla_output = tf.stop_gradient(vanilla_output)
-        # don't want the vanilla_output gradient flowing back through the nm_inp
-        nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], tf.stop_gradient(vanilla_output)], axis=1)
-        # nm_inp.shape = (batch_size, max_seq_len_nm, d_model)
-
-        # below has been removed as there is no reason to apply it twice.
-        #nm_inp = self._pos_encoding_helper(nm_inp, training, self.max_seq_len_nm)
-
-        nm_output, attn_weights_nm, mc_output_dict = self.neuromodulation_set_run(nm_inp, training, mask, mode="default")
-
-        gating_weights = tf.sigmoid(nm_output[:, -self.max_seq_len_dec:, :])
-
-        if not fixed_output:
-            output_, attn_weights_output = self.output_set_run(gating_weights * vanilla_output,
-                                                           training, vanilla_mask, mode_id)
+        if not self.gpt2_bool:
+            vanilla_output, attn_weights_vanilla = self.vanilla_set_run(id_inp[:, -self.max_seq_len_dec:, :], training,
+                                                                        vanilla_mask)
         else:
-            output_, attn_weights_output = self.fixed_output_set_run(gating_weights * vanilla_output,
-                                                           training, vanilla_mask)
-
-        attention_weights["vanilla_attention_weights"] = attn_weights_vanilla
-        attention_weights["nm_attention_weights"] = attn_weights_nm
-        attention_weights["mc_output_attention_weightse"] = mc_output_dict
-        attention_weights["output_attention_weights"] = attn_weights_output
-
-        output_ = tf.nn.softmax(self.final_layer(self.layernorm(output_)), axis=-1) # (batch_size, max_seq_len_dec, target_vocab_size)
-        #task_prediction, attention_weights, vanilla_set_output, gating_weights
-        return output_, attention_weights, vanilla_output, gating_weights
-
-
-    def run_no_rs(self, id_inp, training, mask, fixed_output, stop_gradient):
-        mode_id = tf.stop_gradient(id_inp[0, 2])  # first batch item and the (third) item in the sequence. <cls> <dec> <lm> ...
-        ## NOTE (important): that in a batch only one mode_id is supported.
-
-        id_inp = self.embedding(id_inp)  # (batch_size, max_seq_len_nm, d_model)
-        id_inp = self._pos_encoding_helper(id_inp, training, self.max_seq_len_nm)
-
-        attention_weights = {}
-        if mask.shape[-2] == 1:
-            vanilla_mask = mask[:, :, :, -self.max_seq_len_dec:]
-        else:
-            vanilla_mask = mask[:, :, -self.max_seq_len_dec:, -self.max_seq_len_dec:]
-
-        vanilla_output, attn_weights_vanilla = self.vanilla_set_run(id_inp[:, -self.max_seq_len_dec:, :], training,
-                                                                    vanilla_mask)
+            attn_weights_vanilla=None
+            vanilla_output = None
+            if stop_gradient: # stop_gradient doubles up here if we are using gpt2, no need to define another variable as it makes no difference.
+                vanilla_output = tf.stop_gradient(self._vanilla_gpt_helper(id_orig[:,-self.max_seq_len_dec:], training, gpt_pad_mask[:,-self.max_seq_len_dec:]))
+            else: vanilla_output = self._vanilla_gpt_helper(id_orig[:,-self.max_seq_len_dec:], training, gpt_pad_mask[:,-self.max_seq_len_dec:])
         # vanilla_output.shape = (batch_size, max_seq_len_dec, d_model)
 
         # don't want the vanilla_output gradient flowing back through the nm_inp
         #Below has had stop_gradient commented out...
         if stop_gradient: #== True
+            # note: if stop gradient with gpt2 model, then stopping gradient here does nothing as it has already been stopped.
             nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], tf.stop_gradient(vanilla_output)], axis=1)
         else: # == False
             nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], vanilla_output], axis=1)
@@ -258,7 +253,7 @@ class NMTransformer(tf.keras.Model):
         attention_weights["mc_output_attention_weightse"] = mc_output_dict
         attention_weights["output_attention_weights"] = attn_weights_output
 
-        output_ = tf.nn.softmax(self.final_layer(self.layernorm(output_)), axis=-1) # (batch_size, max_seq_len_dec, target_vocab_size)
+        output_ = tf.nn.softmax(self.final_layer(output_), axis=-1) # (batch_size, max_seq_len_dec, target_vocab_size)
         #task_prediction, attention_weights, vanilla_set_output, gating_weights
         return output_, attention_weights, vanilla_output, gating_weights
 
@@ -273,6 +268,9 @@ class NMTransformer(tf.keras.Model):
     # note id_inp should have the auxiliary tokens removed from both the mask and id_inp...
     def vanilla_set_run(self, id_inp, training, mask):
         return self.vanilla_set(id_inp, training=training, mask=mask)
+
+    def _vanilla_gpt_helper(self, input_ids, training, mask):
+        return self.vanilla_set(input_ids=input_ids, attention_mask=mask, training=training)['last_hidden_state']
 
     # includes auxiliary tokens.
     def neuromodulation_set_run(self, id_inp, training, mask, mode):

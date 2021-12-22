@@ -21,11 +21,11 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         assert d_model % num_heads == 0, f"The number of heads is incompatible with the dimension of the model!"
         self.depth = d_model // num_heads
 
-        self.wq = tf.keras.layers.Dense(d_model, input_shape=(d_model,))
-        self.wk = tf.keras.layers.Dense(d_model, input_shape=(d_model,))
-        self.wv = tf.keras.layers.Dense(d_model, input_shape=(d_model,))
+        self.wq = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01))
+        self.wk = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01))
+        self.wv = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01))
 
-        self.dense = tf.keras.layers.Dense(d_model, input_shape=(d_model,))
+        self.dense = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01))
 
     def split_heads(self, x):
         '''

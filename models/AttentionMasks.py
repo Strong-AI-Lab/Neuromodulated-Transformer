@@ -12,8 +12,11 @@ def create_padding_mask(x, padding_id=0):
     :param x: (torch.Tensor; [batch, seq_len]) The input sequence with 0 (padding_id) representing the tokens to pad.
     :return: (torch.Tensor; [batch, 1, 1, seq_len])
     '''
-    seq = tf.cast(tf.math.equal(x, padding_id), tf.float32)
+    seq = tf.cast(tf.math.equal(x, padding_id), tf.float32) # here a 1 represents a token to pad.
     return seq[:, tf.newaxis, tf.newaxis, :] # add additional dimensions to the padded attention logits.
+
+def create_padding_mask_gpt(x, padding_id=0):
+    return tf.cast(tf.math.logical_not(tf.math.equal(x, padding_id)), tf.float32) # here we want a zero representing a token to pad.
 
 def create_look_ahead_mask(size, num_aux_tok):
     '''

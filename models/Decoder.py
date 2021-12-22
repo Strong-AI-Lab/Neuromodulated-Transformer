@@ -34,8 +34,8 @@ class DecoderLayer(tf.keras.layers.Layer):
         self.mha = MultiHeadAttention(d_model, num_heads)
         self.ffn = FeedForwardNetwork(d_model, dff, "vanilla")
 
-        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6, input_shape=(d_model,))
-        self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6, input_shape=(d_model,))
+        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-05, input_shape=(d_model,))
+        self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-05, input_shape=(d_model,))
 
         self.dropout1 = tf.keras.layers.Dropout(rate=rate, input_shape=(d_model,))
         self.dropout2 = tf.keras.layers.Dropout(rate=rate, input_shape=(d_model,))
@@ -92,10 +92,10 @@ class Decoder(tf.keras.layers.Layer):
 
         # note that the embedding is moving from here to the parent NMTransformer class... as well as the absolute pos embeddings...
 
-        self.W1 = tf.keras.layers.Dense(d_model, input_shape=(d_model,)) # linear projection.
-        self.W2 = tf.keras.layers.Dense(d_model, input_shape=(d_model,)) # linear projection.
-        self.W3 = tf.keras.layers.Dense(d_model, input_shape=(d_model,)) # linear projection.
-        self.W4 = tf.keras.layers.Dense(d_model, input_shape=(d_model*2,)) # input is d_model*2, just noting.
+        self.W1 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
+        self.W2 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
+        self.W3 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
+        self.W4 = tf.keras.layers.Dense(d_model, input_shape=(d_model*2,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # input is d_model*2, just noting.
 
         self.decoder_layers = [DecoderLayer(d_model, num_heads, dff, mask_strategy, rate=rate) for _ in range(num_layers)]
         self.dropout = tf.keras.layers.Dropout(rate, input_shape=(d_model,))
@@ -122,7 +122,7 @@ class Decoder(tf.keras.layers.Layer):
             x, block1 = layer(x=x, training=training, mask=mask)
             attention_weights[f"decoder_layer_{i+1}_block1"] = block1
 
-        x = self.dropout(x)
+        x = self.dropout(x, training=training)
         return x, attention_weights
 
     def aoint_helper(self, x, start, end):

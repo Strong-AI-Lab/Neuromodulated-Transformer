@@ -66,7 +66,7 @@ class NMDecoder(tf.keras.layers.Layer):
         for i, layer in enumerate(self.decoder_layers):
             x, block1 = layer(x=x, training=training, mask=mask)
             attention_weights[f"decoder_layer_{i + 1}_block1"] = block1
-        x = self.dropout(x)
+        x = self.dropout(x, training=training)
 
         if mode == "default": return x, attention_weights, {}
         elif mode == "metacognition":

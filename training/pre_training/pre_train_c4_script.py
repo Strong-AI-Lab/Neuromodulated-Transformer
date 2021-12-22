@@ -33,9 +33,11 @@ if __name__ == "__main__":
 
     config = V4ConfigMediumSize(strategy="MirroredStrategy", batch_size=8*GPUS_AVAILABLE,
                                 loss_object=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False, reduction='none'),
-                                #learning_rate=tf.keras.optimizers.schedules.CosineDecay(0.0001, decay_steps=1000000),
-                                learning_rate=0.00005,
-                                vocab_filepath="/data/kkno604/Neuromodulated-Transformer/vocabulary/vocab1.txt")
+                                learning_rate=tf.keras.optimizers.schedules.CosineDecay(0.0001, decay_steps=1000000),
+                                #learning_rate=0.00005,
+                                vocab_filepath="/data/kkno604/Neuromodulated-Transformer/vocabulary/vocab1.txt",
+                                gpt2_117=True,
+                                tokenizer="gpt2")
     strategy = config.strategy
 
     transformer, optimizer = None, None
@@ -49,7 +51,8 @@ if __name__ == "__main__":
                                         max_seq_len_dec=config.max_seq_len_dec, num_aux_toks=config.num_aux_toks,
                                         mask_strategy=config.mask_strategy, rate=config.rate,
                                         parallel_layers=config.parallel_layers, output_layers=config.output_layers,
-                                        aux_tok_output_layer_map=config.aux_tok_output_layer_map, mode_ids=config.mode_ids)
+                                        aux_tok_output_layer_map=config.aux_tok_output_layer_map, mode_ids=config.mode_ids,
+                                        gpt2_117=config.gpt2_117)
             optimizer = tf.keras.optimizers.Adam(config.learning_rate)
     else:
         transformer = NMTransformer(num_layers_vanilla=config.num_layers_vanilla, num_layers_nm=config.num_layers_nm,
@@ -61,7 +64,8 @@ if __name__ == "__main__":
                                     max_seq_len_dec=config.max_seq_len_dec, num_aux_toks=config.num_aux_toks,
                                     mask_strategy=config.mask_strategy, rate=config.rate,
                                     parallel_layers=config.parallel_layers, output_layers=config.output_layers,
-                                    aux_tok_output_layer_map=config.aux_tok_output_layer_map, mode_ids=config.mode_ids)
+                                    aux_tok_output_layer_map=config.aux_tok_output_layer_map, mode_ids=config.mode_ids,
+                                    gpt2_117=config.gpt2_117)
         optimizer = tf.keras.optimizers.Adam(config.learning_rate)
 
     filepaths = {"C4_nm_pre_train": "/large_data/C4/en/"}
@@ -74,13 +78,13 @@ if __name__ == "__main__":
         data_dict["train"] = strategy.experimental_distribute_dataset(data_dict["train"])
 
     train_class = NMTransformerPreTrainDec(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
-                                           checkpoint_path_recent="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain_C4/",
+                                           checkpoint_path_recent="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain-C4-v4-gpt2-update-gpt2-weights/",
                                            checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
-                                           recent_to_keep=5, load_recent=True, best_to_keep=5, load_best=False,
+                                           recent_to_keep=5, load_recent=False, best_to_keep=5, load_best=False,
                                            load_specific_path="",
                                            enc_tok_id=config.tokenizer.encode_single("<enc>")[0],
                                            dec_tok_id=config.tokenizer.encode_single("<dec>")[0])
-    train_class.train_iteration(epoch_start=0, epoch_end=1, iteration_counter=110000, # 913565
-                                save_filepath_train="/data/kkno604/NMTransformer_pretraining/Results/pretrain_C4/gelu",
+    train_class.train_iteration(epoch_start=0, epoch_end=1, iteration_counter=0,
+                                save_filepath_train="/data/kkno604/NMTransformer_pretraining/Results/pretrain-C4-v4-gpt2-update-gpt2-weights/",
                                 data_dict=data_dict, num_aux_tokens=config.num_aux_toks, save_end_epoch=True,
-                                print_every_iterations=100, save_every_iterations=5000) 
+                                print_every_iterations=100, save_every_iterations=5000)
