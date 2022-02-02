@@ -51,26 +51,29 @@ class SlidingWindowTrain(ParentTrainNL):
 
         #tar_inp includes thMina Rastegar, Ehsan Mehrabi Kermani, and Massoud Khabir. “The relation-ship between metacognitive reading strategies use and reading comprehensionachievement of EFe nm_tokens here in accordance to V4 of the NMT.
         # utilizes the auxiliary loss as a default.
+        gpt_pad_mask = create_padding_mask_gpt(tar_inp, padding_id=self.padding_id)  # look ahead padding is handled by huggingface gpt2 model.
+        mask = create_combined_mask(tar_inp, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
+
         lambda_ = 0.25
-        mask = create_combined_mask(tar_inp, self.padding_id)
 
         loss, size = 0, 0
         with tf.GradientTape() as tape:
             vanilla_set_output, _, task_prediction, _, _ = self.model(None, tar_inp, training=True, mask=mask,
+                                                                      gpt_pad_mask=gpt_pad_mask,
                                                                       reading_strat_mc_bool=False,
-                                                                      vanilla_set_aux_loss_bool=True,
-                                                                      fixed_output=True)
+                                                                      vanilla_set_aux_loss_bool=False,
+                                                                      fixed_output=True, stop_gradient=False)
 
             #real, pred, loss_object, padding_id, window_size, isStart, domask2 = False
             loss, size = self.loss_function(tar_real, task_prediction, self.loss_object, self.padding_id,
                                             self.window_size_train, isStart, domask2=False) # domask2 = False works only if window_size_train = max_seq_len...
-            loss_aux, size_aux = self.loss_function(tar_real, vanilla_set_output, self.loss_object, self.padding_id,
-                                                    self.window_size_train, isStart, domask2=False)
-            loss_ = loss / size
-            loss_aux_ = loss_aux / size_aux
-            loss_ = loss_ + (loss_aux_ * lambda_)
+            #loss_aux, size_aux = self.loss_function(tar_real, vanilla_set_output, self.loss_object, self.padding_id,
+            #                                        self.window_size_train, isStart, domask2=False)
+            #loss_ = loss / size
+            #loss_aux_ = loss_aux / size_aux
+            #loss_ = loss_ + (loss_aux_ * lambda_)
 
-        gradients = tape.gradient(loss_, self.model.trainable_variables)
+        gradients = tape.gradient(loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
         return loss, size
@@ -192,13 +195,18 @@ class SlidingWindowTrain(ParentTrainNL):
 
     def val_step(self, tar_inp, tar_real, num_aux_tokens, isStart):
 
-        mask = create_combined_mask(tar_inp, self.padding_id)
+        gpt_pad_mask = create_padding_mask_gpt(tar_inp, padding_id=self.padding_id)  # look ahead padding is handled by huggingface gpt2 model.
+        mask = create_combined_mask(tar_inp, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
+
+        lambda_ = 0.25
 
         loss, size = 0, 0
         with tf.GradientTape() as tape:
-            vanilla_set_output, _, task_prediction, _, _ = self.model(None, tar_inp, training=True, mask=mask,
+            vanilla_set_output, _, task_prediction, _, _ = self.model(None, tar_inp, training=False, mask=mask,
+                                                                      gpt_pad_mask=gpt_pad_mask,
                                                                       reading_strat_mc_bool=False,
-                                                                      vanilla_set_aux_loss_bool=True)
+                                                                      vanilla_set_aux_loss_bool=False,
+                                                                      fixed_output=True, stop_gradient=False)
 
             # real, pred, loss_object, padding_id, window_size, isStart, domask2 = False
             loss, size = self.loss_function(tar_real, task_prediction, self.loss_object, self.padding_id,
@@ -207,7 +215,7 @@ class SlidingWindowTrain(ParentTrainNL):
 
         return loss, size
 
-    #@tf.function
+    @tf.function
     def _distributed_val_step(self, tar_inp, tar_real, num_aux_tokens, isStart):
         if self.strategy is not None:
             loss, size = self.strategy.run(self.val_step, args=(tar_inp, tar_real, num_aux_tokens, isStart))
@@ -238,9 +246,9 @@ class SlidingWindowTrain(ParentTrainNL):
         '''
         epoch_loss = 0
         epoch_size = 0
-        for (tar_inp, tar_real, nm_inp, isStart) in data:
+        for (tar_inp, tar_real, isStart) in data:
 
-            loss, size = self._distributed_val_step(tar_inp, tar_real, nm_inp, num_aux_tokens, isStart) # use _distributed_val_step becuase it does exactly what is needed already.
+            loss, size = self._distributed_val_step(tar_inp, tar_real, num_aux_tokens, isStart) # use _distributed_val_step becuase it does exactly what is needed already.
             epoch_loss += loss
             epoch_size += size
 

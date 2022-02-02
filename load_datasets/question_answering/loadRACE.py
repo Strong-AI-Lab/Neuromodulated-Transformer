@@ -599,12 +599,13 @@ class RACEDataLoader:
         self.answer_options = [aos for aos in data['options']] # stores a list of lists, of which contain answer options for a given question.
         self.passage_questions = [ques for ques in data['questions']] # will be a list of strings...
 
-    def __call__(self, mode: str):
+    def __call__(self, mode: str, output_layer_tok="lm", shuffle=True):
         #mode default_generate and test_generate is where the whole answer is generated (of a specific label).
         #mode default_label and test_label is where only the label is generated
         # test_generate, test_label are redundant as they aren't included anyway.
         assert mode in ["default_generate", "default_label", "test"] # note need to update with label variants when they are implemented.
-        random.shuffle(self.filenames) # randomly shuffle the list each epoch.
+        if shuffle:
+            random.shuffle(self.filenames) # randomly shuffle the list each epoch.
         if mode == "default_generate":
             for item in self.filenames:
                 self.process_file(self.filepath+item)
@@ -675,9 +676,11 @@ class RACEDataLoader:
                     assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
                                                          f"of the input id ({len(input_id)})"
                     sample_weights = [1] # A placeholder for if it is needed layer on...
-                    yield input_string, input_id, label_, [start_index, end_index], \
+                    aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss.
+                    assert len(aux_label) == len(input_id)
+                    yield input_string, input_id, label_, aux_label, [start_index, end_index], \
                           sample_weights, self.dec_tok_id, self.mqa_tok_id
-            yield None, None, None, None, None, None, None
+            yield None, None, None, None, None, None, None, None
         elif mode == "default_label":
             for item in self.filenames:
                 self.process_file(self.filepath+item)
@@ -751,9 +754,23 @@ class RACEDataLoader:
                     sample_weights = [1] # A placeholder for if it is needed layer on...
                     #print(f"input_string: {input_string}")
                     #print(f"input_id: {input_id} \nlabel_: {label_}")
-                    yield input_string, input_id, label_, [start_index, end_index], \
-                          sample_weights, self.dec_tok_id, self.mqa_tok_id
-            yield None, None, None, None, None, None, None
+                    #yield input_string, input_id, label_, [start_index, end_index], \
+                    #      sample_weights, self.dec_tok_id, self.mqa_tok_id
+                    #print(f"input_id_len: {len(input_id)}")
+                    #print(f"self.seq_len: {self.seq_len}")
+                    #print(f"passage_len: {len(passage)}")
+                    #print(f"passage: {passage} \n\n\n")
+                    #print(f"input_string: {input_string} \n"
+                    #      f"input_string.len: {len(input_string)}")
+                    #print(f"label_: {label_}\n"
+                    #      f"label_len: {len(label_)}")
+                    aux_label = input_id[1:] + [label_[-1]] # auxiliary loss.
+                    assert len(aux_label) == len(input_id)
+                    #print(f"input_string: {input_string} {len(input_string)}")
+                    #print(f"label: {label_} {len(label_)}")
+                    yield input_string, input_id, label_, aux_label, [start_index, end_index], \
+                         sample_weights, self.dec_tok_id, self.lm_tok_id #TODO
+            yield None, None, None, None, None, None, None, None
         elif mode == "test":
             for item in self.filenames:
                 self.process_file(self.filepath+item)

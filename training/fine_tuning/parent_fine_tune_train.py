@@ -38,7 +38,10 @@ class ParentFineTuningNL:
     def __init__(self, model, optimizer, loss_object, loss_function, tokenizer,
                  checkpoint_path_recent, strategy, pad_token="<pad>", end_tok="</s>",
                  recent_to_keep=5, load_recent=False, load_specific_path='',
-                 enc_tok_id=None, dec_tok_id=None, output_layer_name="lm", fine_tuning=True):
+                 enc_tok_id=None, dec_tok_id=None, output_layer_name="lm", fine_tuning=True,
+                 fixed_output=True, stop_gradient=False, reading_strat_mc_bool=False,
+                 vanilla_set_aux_loss_bool=False, lambda_vanilla_set=0.5, lambda_lm=0.1,
+                 lm_aux_loss_global=False, train_cutoff=0):
 
         self.model = model
         self.optimizer = optimizer
@@ -50,6 +53,17 @@ class ParentFineTuningNL:
         self.strategy = strategy
 
         self.fine_tuning = fine_tuning
+        self.fixed_output = fixed_output
+        self.stop_gradient = stop_gradient
+        self.reading_strat_mc_bool = reading_strat_mc_bool
+
+        self.vanilla_set_aux_loss_bool = vanilla_set_aux_loss_bool
+        self.lambda_vanilla_set = lambda_vanilla_set
+        self.lambda_lm = lambda_lm
+        self.lm_aux_loss_global = lm_aux_loss_global
+
+        self.train_epoch = 0
+        self.train_cutoff = train_cutoff
 
         self.padding_id = self.tokenizer.encode_single(pad_token)
         if len(self.padding_id) == 1:
@@ -90,6 +104,7 @@ class ParentFineTuningNL:
     def create_recent_checkpoint(self, keep):
         self.ckpt = tf.train.Checkpoint(model=self.model,
                                         optimizer=self.optimizer)
+        #self.ckpt = tf.train.Checkpoint(model=self.model)
         self.ckpt_manager = tf.train.CheckpointManager(self.ckpt, self.checkpoint_path_recent, max_to_keep=keep)  # maybe remove max_to_keep?
 
     def _load_recent_checkpoint(self):
@@ -100,42 +115,50 @@ class ParentFineTuningNL:
     def _restore_specific_checkpoint(self, filepath):
         self.ckpt.restore(filepath)
 
-    def train_step(self, input_string, input_id, label_id, aoint_indices, sample_weights, num_aux_tokens):
+    def train_step(self, input_string, input_id, label_id, aux_label, aoint_indices, sample_weights, num_aux_tokens):
 
+        gpt_pad_mask = create_padding_mask_gpt(input_id, padding_id=self.padding_id)  # look ahead padding is handled by huggingface gpt2 model.
         mask = create_combined_mask(input_id, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
         #mask = create_padding_mask(input_id, padding_id=self.padding_id)
 
-        lambda_ = 0.25
-
         loss, size = 0, 0
+        train_ = False if self.train_epoch < self.train_cutoff else True
         with tf.GradientTape() as tape:
-            vanilla_set_output, _, task_prediction, _, _ = self.model(input_string, input_id, training=True, mask=mask,
-                                                                      reading_strat_mc_bool=False,
-                                                                      vanilla_set_aux_loss_bool=False,
-                                                                      fixed_output=True, fine_tuning=self.fine_tuning)
+            vanilla_set_output, _, task_prediction, _, _ = self.model(input_string, input_id, training=train_, mask=mask,
+                                                                      gpt_pad_mask=gpt_pad_mask,
+                                                                      reading_strat_mc_bool=self.reading_strat_mc_bool,
+                                                                      vanilla_set_aux_loss_bool=self.vanilla_set_aux_loss_bool,
+                                                                      fixed_output=self.fixed_output,
+                                                                      stop_gradient=self.stop_gradient)
             # ret (vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights)
-            #vanilla_set_output is after it has been passed through dense layer...
+            #vanilla_set_output is after it has been passed through dense layer... 
 
             loss, size = self.loss_function(label_id, task_prediction, self.loss_object, self.padding_id)
             loss_ = loss / size
             # uncomment below for an auxiliary loss...
-            #loss_aux, size_aux = self.loss_function(label_id, vanilla_set_output, self.loss_object, self.padding_id)
-            #loss_aux_ = loss_aux / size_aux
-            #loss_ = loss_ + (loss_aux_*lambda_)
+            #print(f"vanilla_set_output: {vanilla_set_output}")
+            if self.vanilla_set_aux_loss_bool:
+                loss_aux, size_aux = self.loss_function(label_id, vanilla_set_output, self.loss_object, self.padding_id)
+                loss_aux_ = loss_aux / size_aux
+                loss_ = loss_ + (loss_aux_*self.lambda_vanilla_set)
+            if self.lm_aux_loss_global:
+                loss_aux, size_aux = self.loss_function(aux_label, task_prediction, self.loss_object, self.padding_id)
+                loss_aux_ = loss_aux / size_aux
+                loss_ = loss_ + (loss_aux_ * self.lambda_lm)
 
         gradients = tape.gradient(loss_, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
-        #gradients2 = tape.gradient(loss_aux_*lambda_, self.trainable_variables)
-        #self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+        loss = tf.convert_to_tensor([loss], dtype=tf.dtypes.float32)
+        size = tf.convert_to_tensor([size], dtype=tf.dtypes.float32)
 
         return loss, size
 
     @tf.function
-    def _distributed_train_step(self, input_string, input_id, label_id, aoint_indices, sample_weights, num_aux_tokens):
+    def _distributed_train_step(self, input_string, input_id, label_id, aux_label, aoint_indices, sample_weights, num_aux_tokens):
         loss_dec, size_dec = None, None
         if self.strategy is not None:
-            loss_dec, size_dec = self.strategy.run(self.train_step, args=(input_string, input_id, label_id, aoint_indices, sample_weights, num_aux_tokens,))
+            loss_dec, size_dec = self.strategy.run(self.train_step, args=(input_string, input_id, label_id, aux_label, aoint_indices, sample_weights, num_aux_tokens,))
 
             # The if else may be totally irrelevant.
             if self.strategy.num_replicas_in_sync > 1:
@@ -145,7 +168,7 @@ class ParentFineTuningNL:
                 loss_dec = tf.reduce_sum(loss_dec)
                 size_dec = tf.reduce_sum(size_dec)
         else:
-            loss_dec, size_dec = self.train_step(input_string, input_id, label_id, aoint_indices, sample_weights, num_aux_tokens)
+            loss_dec, size_dec = self.train_step(input_string, input_id, label_id, aux_label, aoint_indices, sample_weights, num_aux_tokens)
 
         return loss_dec, size_dec
 
@@ -157,14 +180,16 @@ class ParentFineTuningNL:
 
             start = time.time()
 
+            self.train_epoch = e
+
             #iteration_counter = 0
             batch = 0
             epoch_loss_total = 0
             epoch_size_total = 0
-            for (input_string, input_id, label_id, aoint_indices, sample_weights) in data_dict["train"]:
+            for (input_string, input_id, label_id, aux_label, aoint_indices, sample_weights) in data_dict["train"]:
                 iteration_counter += 1
 
-                loss_dec, size_dec = self._distributed_train_step(input_string, input_id, label_id, aoint_indices,
+                loss_dec, size_dec = self._distributed_train_step(input_string, input_id, label_id, aux_label, aoint_indices,
                                                                   sample_weights, num_aux_tokens)
                 if size_dec == 0:
                     print(f"The size is zero, skip the current batch, it will not be counted due to an error!")
@@ -199,43 +224,45 @@ class ParentFineTuningNL:
                 print(f"Running through the validation set now!")
                 self.run_validation(e, save_filepath_val, data_dict["val"], num_aux_tokens) # note e+1 is not correct.
 
-    def val_step(self, input_string, input_id, label_id, aoint_indices, sample_weights, num_aux_tokens):
+    def val_step(self, input_string, input_id, label_id, aux_label, aoint_indices, sample_weights, num_aux_tokens):
 
+        gpt_pad_mask = create_padding_mask_gpt(input_id, padding_id=self.padding_id)  # look ahead padding is handled by huggingface gpt2 model.
         mask = create_combined_mask(input_id, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
         #mask = create_padding_mask(input_id, padding_id=self.padding_id)
-
-        lambda_ = 0.25
 
         loss, size = 0, 0
         with tf.GradientTape() as tape:
             vanilla_set_output, _, task_prediction, _, _ = self.model(input_string, input_id, training=False, mask=mask,
-                                                                      reading_strat_mc_bool=False,
-                                                                      vanilla_set_aux_loss_bool=False,
-                                                                      fixed_output=True, fine_tuning=self.fine_tuning)
+                                                                      gpt_pad_mask=gpt_pad_mask,
+                                                                      reading_strat_mc_bool=self.reading_strat_mc_bool,
+                                                                      vanilla_set_aux_loss_bool=self.vanilla_set_aux_loss_bool,
+                                                                      fixed_output=self.fixed_output,
+                                                                      stop_gradient=self.stop_gradient)
             # ret (vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights)
             #vanilla_set_output is after it has been passed through dense layer...
 
             loss, size = self.loss_function(label_id, task_prediction, self.loss_object, self.padding_id)
             loss_ = loss / size
-            # uncomment below for an auxiliary loss...
-            #loss_aux, size_aux = self.loss_function(label_id, vanilla_set_output, self.loss_object, self.padding_id)
-            #loss_aux_ = loss_aux / size_aux
-            #loss_ = loss_ + (loss_aux_*lambda_)
+            # uncomment below for an auxiliary loss... no need for it here.
+            #if vanilla_set_aux_loss_bool:
+            #    loss_aux, size_aux = self.loss_function(label_id, vanilla_set_output, self.loss_object, self.padding_id)
+            #    loss_aux_ = loss_aux / size_aux
+            #    loss_ = loss_ + (loss_aux_*self.lambda_)
 
         gradients = tape.gradient(loss_, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
-        #gradients2 = tape.gradient(loss_aux_*lambda_, self.trainable_variables)
-        #self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+        loss = tf.convert_to_tensor([loss], dtype=tf.dtypes.float32)
+        size = tf.convert_to_tensor([size], dtype=tf.dtypes.float32)
 
         return loss, size
 
     @tf.function
-    def _distributed_val_step(self, input_string, input_id, label_id, aoint_indices, sample_weights, num_aux_tokens):
+    def _distributed_val_step(self, input_string, input_id, label_id, aux_label, aoint_indices, sample_weights, num_aux_tokens):
         loss_dec, size_dec = None, None
         if self.strategy is not None:
             loss_dec, size_dec = self.strategy.run(self.val_step, args=(
-            input_string, input_id, label_id, aoint_indices, sample_weights, num_aux_tokens,))
+            input_string, input_id, label_id, aux_label, aoint_indices, sample_weights, num_aux_tokens,))
 
             # The if else may be totally irrelevant.
             if self.strategy.num_replicas_in_sync > 1:
@@ -245,7 +272,7 @@ class ParentFineTuningNL:
                 loss_dec = tf.reduce_sum(loss_dec)
                 size_dec = tf.reduce_sum(size_dec)
         else:
-            loss_dec, size_dec = self.val_step(input_string, input_id, label_id, aoint_indices, sample_weights,
+            loss_dec, size_dec = self.val_step(input_string, input_id, label_id, aux_label, aoint_indices, sample_weights,
                                                  num_aux_tokens)
 
         return loss_dec, size_dec
@@ -255,9 +282,9 @@ class ParentFineTuningNL:
         start = time.time()
         epoch_loss_total = 0
         epoch_size_total = 0
-        for (input_string, input_id, label_id, aoint_indices, sample_weights) in data:
+        for (input_string, input_id, label_id, aux_label, aoint_indices, sample_weights) in data:
 
-            loss_dec, size_dec = self._distributed_val_step(input_string, input_id, label_id, aoint_indices,
+            loss_dec, size_dec = self._distributed_val_step(input_string, input_id, label_id, aux_label, aoint_indices,
                                                               sample_weights, num_aux_tokens)
             if size_dec == 0:
                 print(f"The size is zero, skip the current batch, it will not be counted due to an error!")
@@ -278,12 +305,15 @@ class ParentFineTuningNL:
     def test_step_generate(self, input_string, input_id, all_labels, correct_ao, aoint_indices,
                   num_aux_tokens, max_generate_len):
 
+        gpt_pad_mask = create_padding_mask_gpt(input_id, padding_id=self.padding_id)  # look ahead padding is handled by huggingface gpt2 model.
         mask = create_combined_mask(input_id, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
         #mask = create_padding_mask(input_id, padding_id=self.padding_id)
 
-        generated_ids = self.model.generate_answer(input_string, input_id, training=False, mask=mask,
-                                                   reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
-                                                   fixed_output=True, pad_tok_id=self.padding_id,
+        generated_ids = self.model.generate_answer(input_string, input_id, training=False, mask=mask, gpt_pad_mask=gpt_pad_mask,
+                                                   reading_strat_mc_bool=self.reading_strat_mc_bool,
+                                                   vanilla_set_aux_loss_bool=self.vanilla_set_aux_loss_bool,
+                                                   stop_gradient=self.stop_gradient,
+                                                   fixed_output=self.fixed_output, pad_tok_id=self.padding_id,
                                                    end_tok_id=self.end_tok_id, gen_len_max=max_generate_len)
 
         convert_byte_to_string = lambda i: i.decode("utf-8")
@@ -304,12 +334,22 @@ class ParentFineTuningNL:
     def test_step_label(self, input_string, input_id, all_labels, correct_ao, aoint_indices,
                   num_aux_tokens, max_generate_len):
 
+        gpt_pad_mask = create_padding_mask_gpt(input_id, padding_id=self.padding_id)  # look ahead padding is handled by huggingface gpt2 model.
         mask = create_combined_mask(input_id, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
         #mask = create_padding_mask(input_id, padding_id=self.padding_id)
 
-        generated_ids = self.model.generate_answer(input_string, input_id, training=False, mask=mask,
-                                                   reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
-                                                   fixed_output=True, pad_tok_id=self.padding_id,
+        #vanilla_set_output, _, task_prediction, _, _ = self.model(input_string, input_id, training=False, mask=mask,
+        #                                                          gpt_pad_mask=gpt_pad_mask,
+        #                                                          reading_strat_mc_bool=False,
+         #                                                         vanilla_set_aux_loss_bool=False,
+         #                                                         fixed_output=self.fixed_output,
+          #                                                        stop_gradient=self.stop_gradient)
+
+        generated_ids = self.model.generate_answer(input_string, input_id, training=False, mask=mask, gpt_pad_mask=gpt_pad_mask,
+                                                   reading_strat_mc_bool=self.reading_strat_mc_bool,
+                                                   vanilla_set_aux_loss_bool=self.vanilla_set_aux_loss_bool,
+                                                   stop_gradient=self.stop_gradient,
+                                                   fixed_output=self.fixed_output, pad_tok_id=self.padding_id,
                                                    end_tok_id=self.end_tok_id, gen_len_max=1)
 
         convert_byte_to_string = lambda i: i.decode("utf-8")
@@ -322,6 +362,8 @@ class ParentFineTuningNL:
 
         print(f"Batch accuracy: {correct / total}")
         # return loss_enc, size_enc, loss_dec, size_dec
+        correct = tf.convert_to_tensor([correct], dtype=tf.dtypes.float32)
+        total = tf.convert_to_tensor([total], dtype=tf.dtypes.float32)
         return correct, total
 
     def _accuracy_helper_label(self, cor_label, generated_ids):
@@ -381,12 +423,20 @@ class ParentFineTuningNL:
             #print(f"length of new_input_id: {len(new_input_id)}")
             input_id_ = tf.expand_dims(tf.cast(tf.convert_to_tensor(new_input_id), dtype=tf.dtypes.int64), axis=0) # expand_dims adds back the batch dimension.
             #print(f"input_id new: {input_id.shape}")
+            gpt_pad_mask = create_padding_mask_gpt(input_id_, padding_id=self.padding_id)
             mask = create_combined_mask(input_id_, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)
 
             _, _, task_prediction, _, _ = self.model(input_string, input_id_, training=False, mask=mask,
-                                                                      reading_strat_mc_bool=False,
-                                                                      vanilla_set_aux_loss_bool=False,
-                                                                      fixed_output=True, fine_tuning=False)
+                                                                      gpt_pad_mask=gpt_pad_mask,
+                                                                      reading_strat_mc_bool=self.reading_strat_mc_bool,
+                                                                      vanilla_set_aux_loss_bool=self.vanilla_set_aux_loss_bool,
+                                                                      fixed_output=self.fixed_output,
+                                                                      stop_gradient=self.stop_gradient)
+
+                #self.model(input_string, input_id_, training=False, mask=mask,
+                #                                                      reading_strat_mc_bool=False,
+                #                                                      vanilla_set_aux_loss_bool=False,
+                #                                                      fixed_output=True, fine_tuning=False)
 
             max_avg_prob = self._get_average_log_probs(tf.expand_dims(input_id_[0,-self.model.max_seq_len_dec:], axis=0), task_prediction)
             if max_avg_prob>max_score["max_average_probs"]:
@@ -604,6 +654,7 @@ class ParentFineTuningNL:
     def generate_answer_test(self, e, save_filepath, data, num_aux_tokens,
                              max_generate_len=100, attn_strat="full_attn", filename_prefix="test",
                              test_step_type="generate"):
+        #note: attn_strat isn't used.
         start = time.time()
         correct_samples = 0  # get the number of correct answers to questions.
         total_samples = 0  # the total number of correct questions.
@@ -631,6 +682,42 @@ class ParentFineTuningNL:
         #self._save_epoch_results_nm("test", e+1, save_filepath, header, None, total_accuracy)
         #self._save_test_results_nm_race(filename_suffix, save_filepath, total_accuracy, correct_samples, total_samples)
         self._save_epoch_accuracy_only(filename_prefix, e+1, save_filepath, header, total_accuracy, correct_samples, total_samples)
+
+    def get_test_results_gqa(self, e, save_filepath, data, num_aux_tokens,
+                             max_generate_len=100, attn_strat="full_attn", filename_prefix="test",
+                             test_step_type="generate"):
+        start = time.time()
+        correct_samples = 0  # get the number of correct answers to questions.
+        total_samples = 0  # the total number of correct questions.
+        for (input_string, input_id, all_labels, correct_ao, aoint_indices) in data:  # note: in all labels #TODO -> remove aoint_indices.
+
+            if test_step_type == "generate":
+                correct, total = self._distributed_test_step_generate(input_string, input_id, all_labels, correct_ao,
+                                                                      aoint_indices,
+                                                                      num_aux_tokens, max_generate_len)
+            elif test_step_type == "label":
+                correct, total = self._distributed_test_step_label(input_string, input_id, all_labels, correct_ao,
+                                                                   aoint_indices,
+                                                                   num_aux_tokens, max_generate_len)
+            elif test_step_type == "average_prob":
+                correct, total = self._distributed_test_step_average_prob(input_string, input_id, all_labels,
+                                                                          correct_ao, aoint_indices,
+                                                                          num_aux_tokens, max_generate_len)
+            else:
+                raise Exception(f"Invalid test_step_type parameter")
+
+            correct_samples += correct
+            total_samples += total
+
+        total_accuracy = correct_samples / total_samples
+        print(f'Test Accuracy {total_accuracy} correct: {correct_samples} total: {total_samples}')
+        print(f'Time taken: {time.time() - start:.2f} secs\n')
+
+        header = True if e == 0 else False
+        # self._save_epoch_results_nm("test", e+1, save_filepath, header, None, total_accuracy)
+        # self._save_test_results_nm_race(filename_suffix, save_filepath, total_accuracy, correct_samples, total_samples)
+        self._save_epoch_accuracy_only(filename_prefix, e + 1, save_filepath, header, total_accuracy, correct_samples,
+                                       total_samples)
 
     def _save_epoch_loss_only(self, type_, epoch, save_filepath, header, loss):
 

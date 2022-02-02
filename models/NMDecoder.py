@@ -10,6 +10,7 @@ from models.PositionEncoding import get_angles, positional_encoding
 from models.Decoder import DecoderLayer
 
 class NMDecoder(tf.keras.layers.Layer):
+#class NMDecoder(tf.keras.Model):
     '''
     Description: Implementation of the full Decoder of a transformer (all N layers).
     '''

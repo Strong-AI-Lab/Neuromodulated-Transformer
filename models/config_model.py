@@ -63,7 +63,7 @@ class V4ConfigMediumSize(object):
         elif tokenizer == "gpt2":
             tok = GPT2Tokenizer.from_pretrained('gpt2')
         elif tokenizer == "tf-xl":
-            raise Exception(f"Not implemented yet!")
+            tok = TransfoXLTokenizer.from_pretrained("transfo-xl-wt103")
         else: raise Exception(f"Invalid tokenizer input")
         self.tokenizer = Tokenizer(tok)
         vocab_to_add = None
@@ -75,7 +75,8 @@ class V4ConfigMediumSize(object):
         self.input_vocab_size = self.tokenizer.get_vocab_size()
         self.output_vocab_size = self.tokenizer.get_vocab_size()
 
-        self.num_aux_toks = 3 # <cls> <dec|enc|mc> <lm|mqa|gqa|highlighting_rs|summarize_rs|paraphrase_rs>
+        self.num_aux_toks = 3 # <cls> <dec|enc|mc> <lm|mqa|gqa|highlighting_rs|summarize_rs|paraphrase_rs> OLD FORMAT
+                # <dec|enc|mc> <lm|mqa|gqa> <highlighting_rs|summarize_rs|paraphrase_rs|null> NEW FORMAT - however, what I have done is trained with the old format...
         self.max_seq_len_dec = 768
         self.max_seq_len_nm = self.max_seq_len_dec + self.num_aux_toks
         self.max_position_encoding = self.max_seq_len_nm

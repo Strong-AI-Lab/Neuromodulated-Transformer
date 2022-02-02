@@ -15,7 +15,9 @@ sys.path.append("../..")
 from transformers import TransfoXLTokenizer
 from text_processing.tokenizer import Tokenizer
 
-class SQuADDataLoader:
+from models.config_model import *
+
+class BoolQDataLoader:
     '''
     The implementation of a dataloader for the SQuAD dataset to be utilzed by another higher level data loader.
     '''
@@ -579,129 +581,168 @@ class SQuADDataLoader:
                 self.paraphrase_rs_tok_id = self.paraphrase_rs_tok_id[0]
             print(f"The paraphrase_rs token id is: {self.paraphrase_rs_tok_id}")
 
-            self.data = None
-            with open(self.filepath, "r") as f:
-                self.data = json.load(f)["data"]
+            self.load_data()
 
 
-    def shuffle_data(self):
+    def load_data(self):
+        self.data = None
+        with open(self.filepath, "r") as f:
+            self.data = [json.loads(line) for line in f]
+
+
+    def _shuffle_data(self):
         random.shuffle(self.data) # shuffle in place
-    '''
-    def shuffle_data(self):
-        # shuffle the titles
 
-        # shuffle the paragraphs in a title.
-        for i, item in enumerate(self.data): # item is a dict containing title, paragraph... keys.
-            for j, paragraph in enumerate(item["paragraphs"]): # {"qas":, "context":,""
-                print(f"\n\nparagraph:{paragraph}\n\n")
-                for k, qas in enumerate(paragraph["qas"]):
-                    print(f"\n\nqas:{qas}\n\n")
-                    self.data[i]["paragraphs"][j]["qas"] = random.sample(qas, len(qas)) # shuffle the questions in qas (list)
-                self.data[i]["paragraphs"][j] = random.sample(paragraph, len(paragraph)) # shuffle the paragraphs (list)
-        random.shuffle(self.data)
-    '''
-    def __call__(self, mode: str):
+    def __call__(self, mode: str, shuffle: bool):
+        if shuffle: self._shuffle_data()
+        #print(self.data[:4])
 
-        #if need to shuffle, do it in parent class.
+        if mode == "train" or mode == "val":
+            for dict_ in self.data:
+                answer = "yes" if dict_["answer"] else "no"
+                answer = answer + " " + self.end_tok
+                inp_ = self.p1 + " " + dict_["passage"] + " " + self.question + \
+                    " " + dict_["question"] + " " + self.sep_tok
 
-        if mode == "training" or mode == "val" or mode == "test":
-            for item in self.data:
-                #print(f"item: {item}")
-                for paragraph in item["paragraphs"]: #{dict}
-                    #print(f"paragraph: {paragraph}")
-                    context = paragraph["context"]
-                    quest_ = ""
-                    answer = ""
-                    for qas in paragraph["qas"]: #[{questions:"",id:"",answers:[{text:'',answer_start}]},is_impossible:bool, plausible_answers:[same as answers list.]]
-                        quest_ = qas["question"]
-                        if qas["is_impossible"] is not True:
-                            if len(qas["answers"]) > 1: print("More than one answer given, choosing the first.") # this should not be reached in the training set.
-                            for z in range(len(qas["answers"])):
-                                answer = qas["answers"][z]["text"]
+                data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(inp_, max_seq_len=10000000)  # [0] is ids [1] is string version...
+                label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(answer, max_seq_len=1000000)
 
-                                #print(f"\n\nanswer: {answer}\n\n")
-                                tmp = self.p1 + " " + context + " " + self.question + " " + quest_ + " " + self.sep_tok
-                                tmp_label = answer + " " + self.end_tok
+                if len(data_id_string[1] + label_data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
+                    # note: if >= above, then case when they are equal causes the first element to be doubled twice...
+                    # > is ok as the first element will never be reached, hence ok to add back in as done below.
+                    input_string = [data_id_string[1][0]] + (data_id_string[1] + label_data_id_string[1])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                else:
+                    input_string = data_id_string[1] + label_data_id_string[1]
 
-                                data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(tmp,max_seq_len=10000000)  # [0] is ids [1] is string version...
-                                label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(tmp_label,max_seq_len=1000000)
+                if len(data_id_string[0] + label_data_id_string[0]) > self.seq_len:  # handles overflow.
+                    input_id = [data_id_string[0][0]] + (data_id_string[0] + label_data_id_string[0])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                else:
+                    input_id = data_id_string[0] + label_data_id_string[0]
+                # print(f"Length of input_id: {len(input_id)}")
 
-                                if len(data_id_string[1] + label_data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
-                                    # note: if >= above, then case when they are equal causes the first element to be doubled twice...
-                                    # > is ok as the first element will never be reached, hence ok to add back in as done below.
-                                    input_string = [data_id_string[1][0]] + (data_id_string[1] + label_data_id_string[1])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
-                                else:
-                                    input_string = data_id_string[1] + label_data_id_string[1]
+                label_ = [self.pad_tok_id for i in range(len(input_id) - len(label_data_id_string[0]) - 1)] + \
+                         label_data_id_string[0] + [self.pad_tok_id]
 
-                                if len(data_id_string[0] + label_data_id_string[0]) > self.seq_len:  # handles overflow.
-                                    input_id = [data_id_string[0][0]] + (data_id_string[0] + label_data_id_string[0])[-(self.seq_len-1):]  # if overflow then remove parts of the passage
-                                else:
-                                    input_id = data_id_string[0] + label_data_id_string[0]
-                                # print(f"Length of input_id: {len(input_id)}")
+                #print(f"label_:{label_}\n"
+                #      f"input_string:{input_string}")
 
-                                label_ = [self.pad_tok_id for i in range(len(input_id)-len(label_data_id_string[0])-1)] + \
-                                         label_data_id_string[0] + [self.pad_tok_id]
-                                #         [blah, blah, ..., </s> correct_ao_1, correct_ao_2, </s>]
-                                # [<pad>, <pad>, ..., <pad>, correct_ao_1, correct_ao_2, </s>, <pad>]
-                                # print(f"input_id: {input_id}\nlabel: {label_}")
-                                assert len(label_) == len(
-                                    input_id), f"The length of the label ({len(label_)} doesn't match the length " \
-                                               f"of the input id ({len(input_id)})"
-                                sample_weights = [1]  # A placeholder for if it is needed layer on...
-                                aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
-                                assert len(aux_label) == len(input_id)
+                assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
+                               f"of the input id ({len(input_id)})"
 
-                                #print(f"passage+question: {tmp}\n"
-                                #      f"answer: {tmp_label}\n"
-                                #      f"input_string: {input_string}\n"
-                                #      f"label_: {label_}")
+                sample_weights = [1]  # A placeholder for if it is needed layer on...
+                aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
+                assert len(aux_label) == len(input_id)
 
-                                yield input_string, input_id, label_, aux_label, \
-                                      sample_weights, self.dec_tok_id, self.mqa_tok_id
-                        elif qas["is_impossible"] is True:
-                            assert len(qas["answers"]) == 0
-                            #if len(qas["answers"]) > 1: print("More than one answer given, choosing the first.")  # this should not be reached in the training set.
+                yield input_string, input_id, label_, aux_label, \
+                      sample_weights, self.dec_tok_id, self.gqa_tok_id
+        yield None, None, None, None, None, None, None
 
-                            tmp = self.p1 + " " + context + " " + self.question + " " + quest_ + " " + self.sep_tok
-                            tmp_label = self.end_tok#answer + " " + self.end_tok
 
-                            data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(tmp, max_seq_len=10000000)  # [0] is ids [1] is string version...
-                            label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(tmp_label, max_seq_len=1000000)
 
-                            if len(data_id_string[1] + label_data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
-                                # note: if >= above, then case when they are equal causes the first element to be doubled twice...
-                                # > is ok as the first element will never be reached, hence ok to add back in as done below.
-                                input_string = [data_id_string[1][0]] + (data_id_string[1] + label_data_id_string[1])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
-                            else:
-                                input_string = data_id_string[1] + label_data_id_string[1]
 
-                            if len(data_id_string[0] + label_data_id_string[0]) > self.seq_len:  # handles overflow.
-                                input_id = [data_id_string[0][0]] + (data_id_string[0] + label_data_id_string[0])[-(
-                                            self.seq_len - 1):]  # if overflow then remove parts of the passage
-                            else:
-                                input_id = data_id_string[0] + label_data_id_string[0]
-                            # print(f"Length of input_id: {len(input_id)}")
 
-                            label_ = [self.pad_tok_id for i in
-                                      range(len(input_id) - len(label_data_id_string[0]) - 1)] + \
-                                     label_data_id_string[0] + [self.pad_tok_id]
-                            #         [blah, blah, ..., </s> correct_ao_1, correct_ao_2, </s>]
-                            # [<pad>, <pad>, ..., <pad>, correct_ao_1, correct_ao_2, </s>, <pad>]
-                            # print(f"input_id: {input_id}\nlabel: {label_}")
-                            assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
-                                           f"of the input id ({len(input_id)})"
-                            sample_weights = [1]  # A placeholder for if it is needed layer on...
-                            aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
-                            assert len(aux_label) == len(input_id)
 
-                            #print(f"passage+question: {tmp}\n"
-                            #      f"answer: {tmp_label}\n"
-                            #      f"input_string: {input_string}\n"
-                            #      f"label_: {label_}")
+if __name__ == "__main__":
 
-                            yield input_string, input_id, label_, aux_label, \
-                                  sample_weights, self.dec_tok_id, self.mqa_tok_id
-            yield None, None, None, None, None, None, None
+    config = V4ConfigMediumSize(strategy=None, batch_size=2, loss_object=None, learning_rate=None, gpt2_117=True,
+                                tokenizer="gpt2", vocab_filepath="/data/kkno604/Neuromodulated-Transformer/vocabulary/vocab1.txt")
+
+    enc_tok = "<enc>"
+    dec_tok = "<dec>"
+    mlm_tok = "<mlm>"
+    lm_tok = "<lm>"
+    cls_tok = "<cls>"
+    sep_tok = "<sep>"
+    mask_tok = "<mask>"
+    pad_tok = "<pad>"
+    start_tok = "<s>"
+    end_tok = "</s>"
+    null_tok = "<null>"
+    mqa = "<mqa>"
+    pmqa = "<pmqa>"
+    bmqa = "<bmqa>"
+    peentailment = "<peentailment>"
+    pbentailment = "<pbentailment>"
+    pcoreference = "<pcoreference>"
+    bcoreference = "<bcoreference>"
+    psentiment = "<psentiment>"
+    pgqa = "<pgqa>"
+    psqa = "<psqa>"
+    gqa = "<gqa>"
+    pbqa = "<pbqa>"
+    placeholder = "<placeholder>"
+    translation = "<translation>"
+    a1 = "(1)"
+    a2 = "(2)"
+    a3 = "(3)"
+    a4 = "(4)"
+    a5 = "(5)"
+    a6 = "(6)"
+    a7 = "(7)"
+    a8 = "(8)"
+    a9 = "(9)"
+    passage = "<passage>"
+    p1 = "<p1>"
+    p2 = "<p2>"
+    p3 = "<p3>"
+    p4 = "<p4>"
+    p5 = "<p5>"
+    p6 = "<p6>"
+    p7 = "<p7>"
+    p8 = "<p8>"
+    p9 = "<p9>"
+    hypothesis = "<h>"
+    question = "<q>"
+    metacognition = "<mc>"
+    unk_rs = "<unk_rs>"
+    aoint_rs = "<aoint_rs>"
+    highlighting_rs = "<highlighting_rs>"
+    reread_rs = "<reread_rs>"
+    summarize_rs = "<summarize_rs>"
+    paraphrase_rs = "<paraphrase_rs>"
+    num_reading_strategies = 6
+    pad_to_max_length = True
+    strategy = "random"
+    C4_processed_filepath = ""
+    num_aux_toks = 3
+
+    dloader = BoolQDataLoader(strategy=None,
+                             filepath="/large_data/BoolQ/train.jsonl",
+                             enc_tok=enc_tok, dec_tok=dec_tok,
+                             mlm_tok=mlm_tok, lm_tok=lm_tok,
+                             start_tok=start_tok, end_tok=end_tok,
+                             cls_tok=cls_tok,
+                             sep_tok=sep_tok, mask_tok=mask_tok,
+                             pad_tok=pad_tok, seq_len=768,
+                             pad=False,
+                             a1=a1, a2=a2, a3=a3, a4=a4,
+                             a5=a5, a6=a6, a7=a7, a8=a8,
+                             a9=a9,
+                             passage=passage, p1=p1, p2=p2,
+                             p3=p3, p4=p4, p5=p5, p6=p6,
+                             p7=p7, p8=p8, p9=p9, mqa=mqa,
+                             pmqa=pmqa, bmqa=bmqa,
+                             peentailment=peentailment,
+                             pbentailment=pbentailment,
+                             pcoreference=pcoreference,
+                             bcoreference=bcoreference,
+                             psentiment=psentiment,
+                             pgqa=pgqa, psqa=psqa, gqa=gqa,
+                             pbqa=pbqa,
+                             placeholder=placeholder,
+                             translation=translation,
+                             hypothesis=hypothesis, question=question,
+                             metacognition=metacognition,
+                             unk_rs=unk_rs,
+                             aoint_rs=aoint_rs,
+                             highlighting_rs=highlighting_rs,
+                             reread_rs=reread_rs,
+                             summarize_rs=summarize_rs,
+                             paraphrase_rs=paraphrase_rs,
+                             tokenizer=config.tokenizer)
+
+    mini_gen = dloader("train", True)
+    print(next(mini_gen))
 
 
 

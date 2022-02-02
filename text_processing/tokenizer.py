@@ -127,7 +127,7 @@ class Tokenizer(object):
 
     def decode(self, input):
         # list of integers
-        return self.tokenizer.decode(input)
+        return self.tokenizer.decode(input, skip_special_tokens=True)
 
 if __name__ == "__main__":
 

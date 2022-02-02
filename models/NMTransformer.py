@@ -200,7 +200,9 @@ class NMTransformer(tf.keras.Model):
 
     def run_no_rs(self, id_inp, training, mask, gpt_pad_mask, fixed_output, stop_gradient):
         id_orig = id_inp
-        mode_id = tf.stop_gradient(id_inp[0, 2])  # first batch item and the (third) item in the sequence. <cls> <dec> <lm> ...
+        if id_inp.shape[0] != 0:
+            mode_id = tf.stop_gradient(id_inp[0, 1])  # first batch item and the (second) item in the sequence. <dec> <lm> <rs> ...
+        else: mode_id = tf.zeros(1)
         ## NOTE (important): that in a batch only one mode_id is supported.
 
         # note: if using gpt2 then embedding doesn't utilize non auxiliary tokens.
@@ -299,12 +301,12 @@ class NMTransformer(tf.keras.Model):
         #raise Exception(f"Invalid mode_id, it doesn't match a key specified in aux_tok_output_layer_map")
         return val_
 
-    def generate_answer(self, str_inp, id_inp, training, mask, reading_strat_mc_bool=False,
-                        vanilla_set_aux_loss_bool=False, fixed_output=False,
+    def generate_answer(self, str_inp, id_inp, training, mask, gpt_pad_mask=None, reading_strat_mc_bool=False,
+                        vanilla_set_aux_loss_bool=False, fixed_output=False, stop_gradient=False,
                         pad_tok_id=None, end_tok_id=None, gen_len_max=50):
 
-        #str_inp, id_inp, training, mask, reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
-         #    fixed_output=False, fine_tuning=False
+        #str_inp, id_inp, training, mask, gpt_pad_mask = None, reading_strat_mc_bool = False, vanilla_set_aux_loss_bool = False,
+        #fixed_output = False, stop_gradient = True
 
         batch_size_ = id_inp.shape[0]
 
@@ -327,12 +329,16 @@ class NMTransformer(tf.keras.Model):
                 assert id_inp.shape[0] == batch_size_, f"new decoder input batch size {id_inp.shape[0]} doesn't match the correct batch size {batch_size_}" \
                                               f"\n {print(id_inp.shape)}"
 
+                gpt_pad_mask = create_padding_mask_gpt(id_inp, padding_id=pad_tok_id)
                 mask = create_combined_mask(id_inp, pad_tok_id, self.num_aux_toks)  # [batch_size, 1, seq_len, seq_len]
 
             new_id_inp = []
             #new_nm_inp = []
 
-            task_prediction, _, _, _ = self.run_no_rs(id_inp, training, mask, fixed_output)
+            #id_inp, training, mask, gpt_pad_mask, fixed_output, stop_gradient
+            task_prediction, _, _, _ = self.run_no_rs(id_inp=id_inp, training=training, mask=mask,
+                                                      gpt_pad_mask=gpt_pad_mask, fixed_output=fixed_output,
+                                                      stop_gradient=stop_gradient)
             # TODO add support for metacognition elements... do once that are done in the call function...
             # task_prediction.shape = (batch_size, max_seq_len_dec, target_vocab_size)
 
@@ -420,9 +426,75 @@ class NMTransformer(tf.keras.Model):
 
         return id_prediction, pred_index, end, first_pad_element
 
-    def autoregressive_generation(self, tokenizer, input_sequence="sample input sequence", max_seq_length=100):
-        #tokenizer.encode_single_plus(input_sequence=)
-        tf.cast(tf.convert_to_tensor(input_string), dtype=tf.dtypes.string)
+    def generate_natural_language_top_k(self, string_input, tokenizer, pad_to_length, padding_id, num_aux_tokens, num_to_generate, k=10):
+        '''
+        Function: generate_natural_language. \n
+        Description: Function that generates output text given a string as input using top-k sampling. \n
+            Parts taken from https://medium.com/deep-learning-with-keras/sampling-in-text-generation-b2f4825e1dad
+        Input:
+            string_input: (str) Input to be used as context to generate text. \n
+            pad_to_length: (int) The number of tokens to pad to (i.e. to max_seq_len). \n
+            num_aux_tokens: (int) The number of aux_tokens at the beginning of the neuromodulation encoder's input. \n
+            num_to_generate: (int) The number of words to generate on top of the input.
+        Return:
+            (string)
+        '''
+
+        def softmax(x, theta=2.0):
+            ps = np.exp(x * theta)
+            ps /= np.sum(ps)
+            return ps
+
+        original = string_input
+        new = []
+
+        enc_str = tokenizer.encode_single(string_input)
+        for i in range(num_to_generate):
+            pad_enc_str = enc_str[-pad_to_length:] + [padding_id for _ in range(pad_to_length-len(enc_str[-pad_to_length:]))]
+            encoded_inp = tf.cast(tf.convert_to_tensor(np.asarray(pad_enc_str)),
+                                  dtype=tf.dtypes.int64)  # shape: (inp_seq_len)
+            encoded_inp = tf.expand_dims(encoded_inp, axis=0)  # shape: (batch_size (1), inp_seq_len)
+
+            gpt_pad_mask = create_padding_mask_gpt(encoded_inp, padding_id=padding_id)  # look ahead padding is handled by huggingface gpt2 model.
+            mask = create_combined_mask(encoded_inp, padding_id=padding_id, num_aux_tok=num_aux_tokens)
+
+            #nm_mask = create_combined_mask(encoded_inp, padding_id, num_aux_tokens)
+            #dec_mask = create_combined_mask(encoded_inp, padding_id)
+
+            output, attention_weights, vanilla_output, gating_weights = self.run_no_rs(encoded_inp, False, mask,
+                                                                                       gpt_pad_mask, False, False)
+
+            #output, _, _ = self.model(encoded_inp, encoded_inp, training=False, padding_id=padding_id,
+            #                               num_aux_tok=num_aux_tokens, nm_mask=nm_mask, dec_mask=dec_mask)
+            #predictions = tf.nn.log_softmax(output, axis=-1) # shape: (batch_size (1), max_seq_len, tar_vocab_size)
+            #predictions = output
+            predictions = tf.squeeze(output) # shape: (max_seq_len, tar_vocab_size)
+
+            # -pad_to_length removes tokens if there is more generated than the maximum allowed sequence length. -1 and length of it gets the last index.
+            index = None
+            for i, id in enumerate(enc_str):
+                if id == padding_id: break
+                index = i
+            assert index is not None
+            #print(index)
+            predictions = tf.squeeze(predictions[index-num_aux_tokens,:]) # -num_aux_toks because index inludes aux tokens where the generates output doesn't.
+            # shape: (target_vocab_size)
+            #pred = tf.math.argmax(predictions) # note that for the tokenizer the first index id starts at 0 for my case.
+            top_k_prob, top_k_indices = tf.math.top_k(predictions, k=k, sorted=True)
+            top_k_indices = np.asarray(top_k_indices).astype("int32")
+
+            top_k_redist_prob = softmax(top_k_prob)
+            top_k_redist_prob = np.asarray(top_k_redist_prob).astype("float32")
+
+            sampled_tok_index = np.random.choice(top_k_indices, p=top_k_redist_prob)
+            #print(f"The sampled token (top_k) is {sampled_tok_index}\n"
+            #      f" tokenizer.decode(sampled_tok_index) {tokenizer.decode([sampled_tok_index])}\n"
+            #      f"enc_str: {enc_str}")
+            enc_str.append(sampled_tok_index)
+            #print("tok", tok)
+            new.append(sampled_tok_index)
+
+        return tokenizer.decode(enc_str), original, tokenizer.decode(new)
 
 
 if __name__ == "__main__":

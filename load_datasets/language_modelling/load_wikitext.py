@@ -76,9 +76,11 @@ class load_wikitext103:
 
 
         self.strategy = strategy
-        assert self.strategy in ["default"], f"The strategy {self.strategy} is not supported!"
+        assert self.strategy in ["default", "gpt2-remove"], f"The strategy {self.strategy} is not supported!"
 
-        self.main_heading_pattern = " = [^=]*[^=] = \n"
+        #self.main_heading_pattern = "= [^=]*[^=] = \n"
+        self.main_heading_pattern = "= [^=]*[^=] = \n"
+        self.any_heading_pattern = "= [= ]*[^=]*[^=] [= ]*="
 
         self.data_dict = {} # each article heading will be put here with the associated input.
 
@@ -96,11 +98,13 @@ class load_wikitext103:
             data = f.readlines()
 
         if self.strategy == "default":
+
             counter = 0
             main_heading = None
             document_content = ""
             for i in range(len(data)):
-                if re.match(self.main_heading_pattern, data[i]):
+                if re.search(self.main_heading_pattern, data[i]): # if a heading do the following.
+                    # below if tests for the main heading.
                     if document_content == "": # append the heading here as well as we want it in the input as well.
                         counter += 1
                         if counter > 1: raise Exception(f"counter should never reach a value greater than 1!")
@@ -112,9 +116,37 @@ class load_wikitext103:
                     main_heading = re.sub("\n$", "", data[i])  # for the heading \n is not wanted.
                     continue
                 elif data[i] == " \n": continue # just skip this as it is pointless.
-                else:
+                else: # the content of the heading...
                     document_content += re.sub("\n$", str(self.end_tok), data[i])
             self.data_dict[main_heading] = document_content
+            #print(f"self.data_dict[main_heading]: {self.data_dict[main_heading]}")
+            #print(f"\nmain_heading: {main_heading}\n")
+
+        elif self.strategy == "gpt2-remove":
+
+            main_heading = None
+            document_content = ""
+            for i in range(len(data)):
+                if re.search(self.main_heading_pattern, data[i]):  # if a heading do the following.
+                    # below if tests for the main heading.
+                    if document_content != "":
+                        self.data_dict[main_heading] = document_content
+                        document_content = ""
+                    main_heading = re.sub("\n$", "", data[i])  # for the heading \n is not wanted.
+                    continue
+                elif data[i] == " \n":
+                    continue  # just skip this as it is pointless.
+                else:  # the content of the heading...
+                    txt = data[i]
+                    txt = re.sub(self.any_heading_pattern, "", txt) # removes all headings from the context.
+                    txt = re.sub("\n", "", txt) # remove all end of lines.
+                    txt = re.sub("<unk>", "", txt) # remove all <unk> tokens.
+                    document_content += txt
+                    #document_content += re.sub("\n$", str(self.end_tok), data[i])
+            self.data_dict[main_heading] = document_content
+            #print(f"self.data_dict[main_heading]: {self.data_dict[main_heading]}")
+            #print(f"\nmain_heading: {main_heading}\n")
+
         else:
             raise Exception(f"Invalid strategy: {self.strategy}")
 
@@ -195,7 +227,9 @@ class load_wikitext103:
 
         for i, key in enumerate(keys):
 
-            article_ids = self.tokenizer.encode_single(self.data_dict[key])
+            #article_ids = self.tokenizer.encode_single(self.data_dict[key])
+            article_ids = self.tokenizer.encode_single_id_string_max_seq_len(
+                self.data_dict[key], max_seq_len=10000000)[0]#[1:-2] # 0 is ids, 1 is strings. # no <s> or </s>
             #article_ids = article_ids["input_ids"]
             start_index = 0
             end_index = self.max_seq_len
