@@ -17,7 +17,7 @@ sys.path.append("../..")
 
 from models.config_model import *
 
-class NarrativeQADataLoader:
+class OpenBookQADataLoader:
     '''
     The implementation of a dataloader for the NarrativeQA dataset to be utilzed by another higher level data loader.
     '''
@@ -37,6 +37,7 @@ class NarrativeQADataLoader:
 
         self.filepath = filepath # path to the file containing the data.
         self.strategy = strategy  # train, validation, test -- train and validation will be the same.
+        #assert strategy in ["train", "val", "valid", "test"]
 
         self.enc_tok = enc_tok
         self.dec_tok = dec_tok
@@ -49,7 +50,7 @@ class NarrativeQADataLoader:
         self.mask_tok = mask_tok
         self.pad_tok = pad_tok
 
-        self.pad = pad  # TODO: not supported.
+        self.pad = pad
         self.seq_len = seq_len
 
         self.a1 = a1
@@ -573,103 +574,47 @@ class NarrativeQADataLoader:
 
         self.load_data()
 
-
     def load_data(self):
 
-        self.questions = [] # {"document_id":None, "question":None, "answer1":None, "answer2":None}
-        self.summaries = {} # {"document_id":None, "summary":None}
+        self.data = None
+        with open(self.filepath, "r") as f: # note need .jsonl file.
+            self.data = [json.loads(line) for line in f]
 
-        questions = pd.read_csv(self.filepath + "qaps.csv")
-        #questions.set_index("document_id", inplace=True)
-        summaries = pd.read_csv(self.filepath + "third_party/wikipedia/summaries.csv")
-
-
-        self._process_questions(questions)
-        self._process_summaries(summaries)
-
-        # test - train - valid
-        self.train_data = [] # each is a list of dictionaries.
-        self.val_data = []
-        self.test_data = []
-
-        assert self.strategy in ["train", "val", "valid", "test", "all"]
-        if self.strategy == "train":
-            self.train_data = self._process_data_further(strat="train")
-        elif self.strategy == "val" or self.strategy == "valid":
-            self.val_data = self._process_data_further(strat="valid")
-        elif self.strategy == "test":
-            self.test_data = self._process_data_further(strat="test")
-        elif self.strategy == "all":
-            self.train_data = self._process_data_further(strat="train")
-            self.val_data = self._process_data_further(strat="valid")
-            self.test_data = self._process_data_further(strat="test")
-        else: raise Exception(f"Invalid strategy!")
-
-        #print(f"train_data: {self.train_data[0:2]}")
-        #print(f"val_data: {self.val_data[0:2]}")
-        #print(f"test_data: {self.test_data[0:2]}")
-
-    def _process_data_further(self, strat: str):
-        assert strat in ["train", "valid", "test"]
-        outer_list = []
-        for dict_ in self.questions:
-            tmp_dict = {}
-            if dict_["set"] == strat:
-                tmp_dict["question"] = dict_["question"]
-                tmp_dict["answer1"] = dict_["answer1"]
-                tmp_dict["answer2"] = dict_["answer2"]
-                if dict_["document_id"] in self.summaries.keys():
-                    tmp_dict["passage"] = self.summaries[dict_["document_id"]]["summary"]
-                else:
-                    raise Exception(f"Summary for document id is missing from the keys...")
-            else:
-                continue
-            outer_list.append(tmp_dict)
-        return outer_list
-
-    def _process_questions(self, questions):
-        for i in range(questions.shape[0]):
-            tmp_dict = {}
-            tmp_dict["document_id"] = str(questions["document_id"][i])
-            tmp_dict["question"] = str(questions["question"][i])
-            tmp_dict["set"] = str(questions["set"][i])
-            tmp_dict["answer1"] = str(questions["answer1"][i])
-            tmp_dict["answer2"] = str(questions["answer2"][i])
-            self.questions.append(tmp_dict)
-
-    def _process_summaries(self, summaries):
-        for i in range(summaries.shape[0]):
-            tmp_dict = {}
-            tmp_dict["document_id"] = str(summaries["document_id"][i])
-            tmp_dict["set"] = str(summaries["set"][i])
-            tmp_dict["summary"] = str(summaries["summary"][i])
-            self.summaries[tmp_dict["document_id"]] = tmp_dict
-
-    def _process_documents(self, documents):
-        pass
+    def _map_latin_to_int_helper(self, latin: str):
+        if latin in ["A", "(A)", "1", "(1)"]: return self.a1
+        elif latin in ["B", "(B)", "2", "(2)"]: return self.a2
+        elif latin in ["C", "(C)", "3", "(3)"]: return self.a3
+        elif latin in ["D", "(D)", "4", "(4)"]: return self.a4
+        elif latin in ["E", "(E)", "5", "(5)"]: return self.a5
+        elif latin in ["F", "(G)", "6", "(6)"]: return self.a6
+        elif latin in ["G", "(G)", "7", "(7)"]: return self.a7
+        elif latin in ["H", "(H)", "8", "(8)"]: return self.a8
+        elif latin in ["I", "(I)", "9", "(9)"]: return self.a9
+        else: raise Exception(f"Invalid latin input: {latin}!")
 
     def _shuffle_data(self):
-        random.shuffle(self.train_data) # shuffle in place
-        random.shuffle(self.val_data)
-        random.shuffle(self.test_data)
+        random.shuffle(self.data)  # shuffle in place
 
     def __call__(self, mode: str, shuffle: bool):
+
         if shuffle: self._shuffle_data()
-        #print(self.data[:4])
 
-        if mode == "train":
-            for dict_ in self.train_data:
+        if mode == "train_label" or mode == "val_label":
+            for dict_ in self.data:
 
-                # randomly select one of the two acceptable answers.
-                if random.random() <= 0.5: answer = dict_["answer1"] + " " + self.end_tok
-                else: answer = dict_["answer2"] + " " + self.end_tok
+                question_stem = dict_["question"]["stem"] # str: question stem.
+                answer_options = dict_["question"]["choices"] # list of dictionaries.
+                answer = self._map_latin_to_int_helper(dict_["answerKey"])
 
-                inp_ = self.p1 + " " + dict_["passage"] + " " + self.question + " " + dict_["question"] + \
-                    " " + self.sep_tok
+                ques = self.question + " " + question_stem + " "
+                for ans in answer_options:
+                    ques += self._map_latin_to_int_helper(ans["label"]) + " " + ans["text"] + " "
+                ques += self.sep_tok
 
-                data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(inp_, max_seq_len=10000000)  # [0] is ids [1] is string version...
+                #answer += " " + self.end_tok # don't need the end token in this mode.
+
+                data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(ques, max_seq_len=10000000)  # [0] is ids [1] is string version...
                 label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(answer, max_seq_len=1000000)
-                #print(f"length:{len(data_id_string[0])}") # note ~1300 if my model can handle it.
 
                 if len(data_id_string[1] + label_data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
                     # note: if >= above, then case when they are equal causes the first element to be doubled twice...
@@ -685,128 +630,62 @@ class NarrativeQADataLoader:
                 # print(f"Length of input_id: {len(input_id)}")
 
                 label_ = [self.pad_tok_id for i in range(len(input_id) - len(label_data_id_string[0]) - 1)] + \
-                         label_data_id_string[0] + [self.pad_tok_id]
+                         label_data_id_string[0] + [self.pad_tok_id] # note -1 in the range is becuase we include answer in the input_id, otherwise it would be zero.
 
                 assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
-                               f"of the input id ({len(input_id)})"
+                                                     f"of the input id ({len(input_id)})"
 
                 sample_weights = [1]  # A placeholder for if it is needed layer on...
                 #aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
-                aux_label = input_id[1:] + [self.pad_tok_id]
-                # [pad_tok_id: </s> pred/output is None]
+                aux_label = input_id[1:-1] + [self.pad_tok_id, self.pad_tok_id] #:-1 b/c don't want answer in auxiliary loss and it is included in input_id and input_string --- unlike the code in RACE which doesn't included it, hence, why it is different.
+                # [pad_tok_id (<sep> token pred/output is None), pad_tok_id ((1) pred/output pred is None)]
                 assert len(aux_label) == len(input_id)
 
-                yield input_string, input_id, label_, aux_label, \
-                      sample_weights, self.dec_tok_id, self.gqa_tok_id
-            yield None, None, None, None, None, None, None
-        elif mode == "val" or mode == "valid": # note: does both answer options separately.
-            for dict_ in self.val_data:
+                start_index = data_id_string[0].index(self.a1_tok_id)  # there is only one match, so .index is sufficient.
+                end_index = len(data_id_string[0]) - 1  # this doesn't include the correct answer option and does not include <sep> token at the end.
 
-                # randomly select one of the two acceptable answers.
-                #if random.random() <= 0.5: answer = dict_["answer1"] + " " + self.end_tok
-                #else: answer = dict_["answer2"] + " " + self.end_tok
+                #print(f"input_string: {input_string}\ninput_id: {input_id}\t{len(input_id)}\nlabel: {label_}\t{len(label_)}\naux_label: "
+                #      f"{aux_label}\t{len(aux_label)}")
 
-                answers  = [dict_["answer1"] + " " + self.end_tok,
-                            dict_["answer2"] + " " + self.end_tok]
+                yield input_string, input_id, label_, aux_label, [start_index, end_index], \
+                      sample_weights, self.dec_tok_id, self.mqa_tok_id
+            yield None, None, None, None, None, None, None, None
 
-                for answer in answers:
+        elif mode == "test":
 
-                    inp_ = self.p1 + " " + dict_["passage"] + " " + self.question + " " + dict_["question"] + \
-                        " " + self.sep_tok
+            for dict_ in self.data:
 
-                    data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(inp_, max_seq_len=10000000)  # [0] is ids [1] is string version...
-                    label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(answer, max_seq_len=1000000)
+                question_stem = dict_["question"]["stem"]  # str: question stem.
+                answer_options = dict_["question"]["choices"]  # list of dictionaries.
+                label = self._map_latin_to_int_helper(dict_["answerKey"])
+                all_labels = ''
+                for a in answer_options:
+                    all_labels += self._map_latin_to_int_helper(a["label"]) + " " + a["text"] + " "
 
-                    if len(data_id_string[1] + label_data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
-                        # note: if >= above, then case when they are equal causes the first element to be doubled twice...
-                        # > is ok as the first element will never be reached, hence ok to add back in as done below.
-                        input_string = [data_id_string[1][0]] + (data_id_string[1] + label_data_id_string[1])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
-                    else:
-                        input_string = data_id_string[1] + label_data_id_string[1]
+                ques = self.question + " " + question_stem + " "
+                ques += all_labels + self.sep_tok
 
-                    if len(data_id_string[0] + label_data_id_string[0]) > self.seq_len:  # handles overflow.
-                        input_id = [data_id_string[0][0]] + (data_id_string[0] + label_data_id_string[0])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
-                    else:
-                        input_id = data_id_string[0] + label_data_id_string[0]
-                    # print(f"Length of input_id: {len(input_id)}")
-
-                    label_ = [self.pad_tok_id for i in range(len(input_id) - len(label_data_id_string[0]) - 1)] + \
-                             label_data_id_string[0] + [self.pad_tok_id]
-
-                    assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
-                                   f"of the input id ({len(input_id)})"
-
-                    sample_weights = [1]  # A placeholder for if it is needed layer on...
-                    #aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
-                    aux_label = input_id[1:] + [self.pad_tok_id]
-                    # [pad_tok_id: </s> pred/output is None]
-                    assert len(aux_label) == len(input_id)
-
-                    yield input_string, input_id, label_, aux_label, \
-                          sample_weights, self.dec_tok_id, self.gqa_tok_id
-            yield None, None, None, None, None, None, None
-        elif mode == "test": # note: returns both answers in one list.
-
-            for dict_ in self.test_data:
-
-                # randomly select one of the two acceptable answers.
-                #if random.random() <= 0.5: answer = dict_["answer1"] + " " + self.end_tok
-                #else: answer = dict_["answer2"] + " " + self.end_tok
-
-                answers  = [str(dict_["answer1"]), str(dict_["answer2"])]
-
-                inp_ = self.p1 + " " + dict_["passage"] + " " + self.question + " " + dict_["question"] + \
-                    " " + self.sep_tok
-
-                data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(inp_, max_seq_len=10000000)  # [0] is ids [1] is string version...
+                data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(ques, max_seq_len=10000000)  # [0] is ids [1] is string version...
 
                 if len(data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
                     # note: if >= above, then case when they are equal causes the first element to be doubled twice...
                     # > is ok as the first element will never be reached, hence ok to add back in as done below.
-                    input_string = [data_id_string[1][0]] + (data_id_string[1])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                    input_string = [data_id_string[1][0]] + (data_id_string[1][1])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
                 else:
                     input_string = data_id_string[1]
 
                 if len(data_id_string[0]) > self.seq_len:  # handles overflow.
-                    input_id = [data_id_string[0][0]] + (data_id_string[0])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                    input_id = [data_id_string[0][0]] + (data_id_string[0])[-(
+                                self.seq_len - 1):]  # if overflow then remove parts of the passage
                 else:
                     input_id = data_id_string[0]
-                # print(f"Length of input_id: {len(input_id)}")
 
-                yield input_string, input_id, answers, self.dec_tok_id, self.gqa_tok_id
-            yield None, None, None, None, None
+                start_index = data_id_string[0].index(self.a1_tok_id)  # there is only one match, so .index is sufficient.
+                end_index = len(data_id_string[0])-1  # this doesn't include the correct answer option and does not include <sep> token at the end. (b/c not inclusive upper argument).
 
-        elif mode == "val_test": # note: returns both answers in one list.
-
-            for dict_ in self.val_data:
-
-                # randomly select one of the two acceptable answers.
-                #if random.random() <= 0.5: answer = dict_["answer1"] + " " + self.end_tok
-                #else: answer = dict_["answer2"] + " " + self.end_tok
-
-                answers  = [str(dict_["answer1"]), str(dict_["answer2"])]
-
-                inp_ = self.p1 + " " + dict_["passage"] + " " + self.question + " " + dict_["question"] + \
-                    " " + self.sep_tok
-
-                data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(inp_, max_seq_len=10000000)  # [0] is ids [1] is string version...
-
-                if len(data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
-                    # note: if >= above, then case when they are equal causes the first element to be doubled twice...
-                    # > is ok as the first element will never be reached, hence ok to add back in as done below.
-                    input_string = [data_id_string[1][0]] + (data_id_string[1])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
-                else:
-                    input_string = data_id_string[1]
-
-                if len(data_id_string[0]) > self.seq_len:  # handles overflow.
-                    input_id = [data_id_string[0][0]] + (data_id_string[0])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
-                else:
-                    input_id = data_id_string[0]
-                # print(f"Length of input_id: {len(input_id)}")
-
-                yield input_string, input_id, answers, self.dec_tok_id, self.gqa_tok_id
-            yield None, None, None, None, None
-
+                yield input_string, input_id, all_labels, label, [start_index, end_index], self.dec_tok_id, self.mqa_tok_id
+            yield None, None, None, None, None, None, None
+        else: raise Exception(f"Invalid mode: it either not supported or not implemented yet!")
 
 if __name__ == "__main__":
 
@@ -872,8 +751,8 @@ if __name__ == "__main__":
     C4_processed_filepath = ""
     num_aux_toks = 3
 
-    dloader = NarrativeQADataLoader(strategy="all",
-                             filepath="/large_data/NarrativeQA/narrativeqa-master/",
+    dloader = OpenBookQADataLoader(strategy="train",
+                             filepath="/large_data/OpenBookQA-V1-Sep2018/Data/Main/train.jsonl",
                              enc_tok=enc_tok, dec_tok=dec_tok,
                              mlm_tok=mlm_tok, lm_tok=lm_tok,
                              start_tok=start_tok, end_tok=end_tok,
@@ -908,10 +787,9 @@ if __name__ == "__main__":
                              #tokenizer=None)
                              tokenizer=config.tokenizer)
 
-    mini_gen = dloader("test", True)
+    mini_gen = dloader("train_label", False)
     print(next(mini_gen))
-    #while True:
-    #    next(mini_gen)
+
 
 
 

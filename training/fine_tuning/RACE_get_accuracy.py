@@ -3,7 +3,7 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "4"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 GPUS_AVAILABLE = 1
 
 import sys
@@ -23,7 +23,7 @@ import numpy as np
 
 tf.config.run_functions_eagerly(False)
 
-from training.fine_tuning.parent_fine_tune_train import *
+from training.fine_tuning.fine_tuning_class import *
 #from training.pre_training.pre_train_class import *
 from models.NMTransformer import *
 from models.config_model import *
@@ -48,6 +48,11 @@ if __name__ == "__main__":
                                 gpt2_117=True,
                                 tokenizer="gpt2")
     strategy = config.strategy
+
+    ### Override default sequence length 1300
+    #config.max_seq_len_dec = 1300
+    #config.max_seq_len_nm = config.max_seq_len_dec + config.num_aux_toks
+    #config.max_position_encoding = config.max_seq_len_nm
 
     transformer, optimizer = None, None
     if strategy is not None:
@@ -79,41 +84,35 @@ if __name__ == "__main__":
 
     filepaths = {"RACE_high_test": "/large_data/RACE/test/high/",
                  "RACE_middle_test": "/large_data/RACE/test/middle/"}
+    #filepaths = {"RACE_high_test": "/large_data/RACE/dev/high/",
+    #             "RACE_middle_test": "/large_data/RACE/dev/middle/"}
     dloader_test = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size, tokenizer=config.tokenizer)
-    #generator = dloader_train.get_generator(type="C4_pretrain_dec", shuffle=False).batch(config.batch_size)
-    #generator_test = dloader_test.get_generator("RACE_middle_test", False).batch(config.batch_size)
-    generator_test = dloader_test.get_generator("RACE_high_test", False).batch(config.batch_size)
+
+    #generator_test = dloader_test.get_generator("RACE_middle_test", False, override_lm=True).batch(config.batch_size)
+    generator_test = dloader_test.get_generator("RACE_high_test", False, override_lm=True).batch(config.batch_size)
 
     data_dict = {}
     data_dict["test"] = generator_test
     if strategy is not None:
         data_dict["test"] = strategy.experimental_distribute_dataset(data_dict["test"])
 
-    #train_class = ParentFineTuningNL(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
-    #                                       checkpoint_path_recent="/data/kkno604/NMTransformer_fine_tuning/RACE/Checkpoints2/",
-    #                                       strategy=strategy, pad_token="<pad>", recent_to_keep=5, load_recent=False,
-    #                                       load_specific_path="/data/kkno604/NMTransformer_fine_tuning/RACE/Checkpoints/no_freeze_label_only/ckpt-204",
-    #                                       enc_tok_id=config.tokenizer.encode_single("<enc>")[0],
-    #                                       dec_tok_id=config.tokenizer.encode_single("<dec>")[0],
-    #                                       output_layer_name="lm", fine_tuning=False)
     #TODO remember "lm" and "mqa" to switch between the two.
 
-    train_class = ParentFineTuningNL(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
-                                     checkpoint_path_recent="/data/kkno604/Specific-fine-tuning/RACE/Checkpoints/no_freeze_gpt2_update_all_pretrain/",
-                                     strategy=strategy, pad_token="<pad>", recent_to_keep=10, load_recent=False,
-                                     # load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain-C4-v4-gpt2/ckpt-48",
-                                     #load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/gpt-2-saved-checkpoints/ckpt-200",
-                                     load_specific_path="/data/kkno604/Specific-fine-tuning/RACE/Checkpoints/Final_V4_model_gpt2_nofreeze/ckpt-220",
-                                     #load_specific_path="",
-                                     enc_tok_id=config.tokenizer.encode_single("<enc>")[0],
-                                     dec_tok_id=config.tokenizer.encode_single("<dec>")[0],
-                                     output_layer_name="lm", fine_tuning=False,
-                                     fixed_output=True, stop_gradient=False,
-                                     reading_strat_mc_bool=False, lambda_vanilla_set=0.5, lambda_lm=0.1,
-                                     vanilla_set_aux_loss_bool=False,
-                                     lm_aux_loss_global=False, train_cutoff=3)
+    train_class = FineTuningClass(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
+                                  checkpoint_path_recent="/home/kkno604/Documents/V4 results/Specific-fine-tuning/RACE/Checkpoints/",
+                                  strategy=strategy, pad_token="<pad>", end_tok = "</s>",
+                                  recent_to_keep=20, load_recent=False,
+                                  #load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain-C4-v4-gpt2/ckpt-48",
+                                  #load_specific_path="/home/kkno604/Documents/V4 results/Specific-fine-tuning/RACE/Checkpoints/ckpt-220",
+                                  load_specific_path="/home/kkno604/Documents/V4 results/Specific-fine-tuning/RACE/Checkpoints/ckpt-226",
+                                  #load_specific_path="",
+                                  enc_tok="<enc>", dec_tok="<dec>",
+                                  output_layer_name="lm", fixed_output=True, stop_gradient=False,
+                                  reading_strat_mc_bool=False, lambda_vanilla_set=0.5, lambda_lm=0.2,
+                                  vanilla_set_aux_loss_bool=False,
+                                  lm_aux_loss_global=False, train_cutoff=0)
 
-    train_class.generate_answer_test(e=0, save_filepath="/data/kkno604/Specific-fine-tuning/RACE/Results/Final_V4_model_gpt2_nofreeze/",
-                                     data=data_dict["test"], num_aux_tokens=config.num_aux_toks,
-                                     max_generate_len=1, attn_strat="full_attn", filename_prefix="test_high_final_epoch_20",
-                                     test_step_type="label")
+    train_class.get_test_results(e=0, save_filepath="/home/kkno604/Documents/V4 results/Specific-fine-tuning/RACE/Results/",
+                                 data=data_dict["test"], num_aux_tokens=config.num_aux_toks,
+                                 max_generate_len=100, filename_prefix="RACE_middle-epoch-26-high", metrics=["accuracy"],
+                                 mode="MQA_label_only", multiple_answers=False)

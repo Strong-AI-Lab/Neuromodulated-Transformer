@@ -86,7 +86,7 @@ class GQA_class(ParentFineTuningNL):
         return loss, size
 
     @tf.function
-    def _distributed_train_step(self, input_string, input_id, label_id, aux_label,  sample_weights, num_aux_tokens):
+    def _distributed_train_step(self, input_string, input_id, label_id, aux_label, sample_weights, num_aux_tokens):
         loss_dec, size_dec = None, None
         if self.strategy is not None:
             loss_dec, size_dec = self.strategy.run(self.train_step, args=(input_string, input_id, label_id, aux_label,  sample_weights, num_aux_tokens,))

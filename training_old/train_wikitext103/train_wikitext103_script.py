@@ -3,8 +3,8 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,3,4,6"
-GPUS_AVAILABLE = 4
+os.environ["CUDA_VISIBLE_DEVICES"] = "5,6"
+GPUS_AVAILABLE = 2
 
 import sys
 sys.path.append("../..")
@@ -23,30 +23,22 @@ import numpy as np
 
 tf.config.run_functions_eagerly(False)
 
-from training.fine_tuning.fine_tuning_class import *
-#from training.pre_training.pre_train_class import *
+from training.parent_train import *
+from training.train_wikitext103.train_wikitext103_class import *
 from models.NMTransformer import *
 from models.config_model import *
-from models.custom_lr_schedules import CosineDecayLW
-from load_datasets.MasterDataLoader import *
-from load_datasets.question_answering.loadRACE import RACEDataLoader
-from load_datasets.question_answering.BoolQ import BoolQDataLoader
-
-#tf.keras.backend.clear_session()
+from load_datasets.language_modelling.load_wikitext import *
 
 if __name__ == "__main__":
 
-    config = V4ConfigMediumSize(strategy="MirroredStrategy", batch_size=8*GPUS_AVAILABLE,
+    config = V4ConfigMediumSize(strategy="MirroredStrategy", batch_size=2*GPUS_AVAILABLE,
                                 loss_object=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False, reduction='none'),
-                                #learning_rate=tf.keras.optimizers.schedules.CosineDecay(0.0001, decay_steps=1000000),
-                                #learning_rate=0.00001,
-                                learning_rate=CosineDecayLW(start_lr=0.00005, lower_bound_lr=0.00001, upper_bound_lr=0.0001,
-                                                            warmup_steps=2000, decay_steps=4000 * 30),
+                                learning_rate=tf.keras.optimizers.schedules.CosineDecay(0.0001, decay_steps=400000),
+                                #learning_rate=0.0001,
                                 vocab_filepath="/data/kkno604/Neuromodulated-Transformer/vocabulary/vocab1.txt",
                                 gpt2_117=True,
-                                tokenizer="gpt2")
+                                tokenizer="tf-xl")
     strategy = config.strategy
-    #strategy = None
 
     transformer, optimizer = None, None
     if strategy is not None:
@@ -76,41 +68,40 @@ if __name__ == "__main__":
                                     gpt2_117=config.gpt2_117)
         optimizer = tf.keras.optimizers.Adam(config.learning_rate)
 
-    filepaths = {"BoolQ_train": "/large_data/BoolQ/train.jsonl",
-                 "BoolQ_val": "/large_data/BoolQ/dev.jsonl"}
+    dataloader1 = load_wikitext103(filepath="/large_data/wikitext-103/wiki.train.tokens", max_seq_len=config.max_seq_len_dec,
+                                  tokenizer=config.tokenizer, start_tok="<s>", end_tok="</s>", pad_tok="<pad>",
+                                  pad_to_max_length=True, strategy="default", load_data=[False, ""])
+    dataloader2 = load_wikitext103(filepath="/large_data/wikitext-103/wiki.valid.tokens",
+                                   max_seq_len=config.max_seq_len_dec,
+                                   tokenizer=config.tokenizer, start_tok="<s>", end_tok="</s>", pad_tok="<pad>",
+                                   pad_to_max_length=True, strategy="default", load_data=[False, ""])
 
-    dloader_train = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec,
-                                       batch_size=config.batch_size, tokenizer=config.tokenizer)
-    generator_train = dloader_train.get_generator(type="BoolQ_train", shuffle=True, override_lm=True).batch(config.batch_size)
+    process_strategy = "sliding_window_article"
 
     data_dict = {}
-    data_dict["train"] = generator_train
+
+    # for both the process strategy is sliding_window_article as if you set window size to max_seq_size then it is the same as defaut...
+    data_dict["train"] = dataloader1.get_tf_dataset_generator(process_strategy="sliding_window_article", shuffle=True, pad=True,
+                                                             sliding_window=config.max_seq_len_dec,
+                                                             nm_aux_tokens=["<dec>", "<lm>", "<null>"]).batch(config.batch_size)
+
     if strategy is not None:
         data_dict["train"] = strategy.experimental_distribute_dataset(data_dict["train"])
 
-    dloader_val = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec,
-                                       batch_size=config.batch_size, tokenizer=config.tokenizer)
-    generator_val = dloader_val.get_generator(type="BoolQ_val", shuffle=False, override_lm=True).batch(config.batch_size)
-
-    data_dict["val"] = generator_val
+    data_dict["val"] = dataloader2.get_tf_dataset_generator(process_strategy="sliding_window_article", shuffle=False,
+                                                           pad=True, sliding_window=config.max_seq_len_dec,
+                                                           nm_aux_tokens=["<dec>", "<lm>", "<null>"]).batch(config.batch_size)
     if strategy is not None:
         data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
 
-    train_class = FineTuningClass(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
-                                  checkpoint_path_recent="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Checkpoints/",
-                                  strategy=strategy, pad_token="<pad>", end_tok="</s>",
-                                  recent_to_keep=20, load_recent=False,
-                                  # load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain-C4-v4-gpt2/ckpt-48",
-                                  load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/gpt-2-saved-checkpoints/ckpt-200",
-                                  # load_specific_path="",
-                                  enc_tok="<enc>", dec_tok="<dec>",
-                                  output_layer_name="lm", fixed_output=True, stop_gradient=False,
-                                  reading_strat_mc_bool=False, lambda_vanilla_set=0.5, lambda_lm=0.2,
-                                  vanilla_set_aux_loss_bool=True,
-                                  lm_aux_loss_global=True, train_cutoff=0)
+    train_class = SlidingWindowTrain(transformer, optimizer, config.loss_object, loss_function_window_size, config.tokenizer,
+                                     checkpoint_path_recent="/data/kkno604/Language_model_experiments/Wikitext103/GPT2_update_weights/Checkpointsgpttrue/",
+                                     checkpoint_path_best="", strategy=strategy, pad_token="<pad>",
+                                     recent_to_keep=10, load_recent=False, best_to_keep=5, load_best=False,
+                                     window_size_train=config.max_seq_len_dec, window_size_val=config.max_seq_len_dec,
+                                     load_specific_path="")
 
-    train_class.train_batch_GQA(epoch_start=0, epoch_end=30,
-                                save_filepath_train="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Results/",
-                                save_filepath_val="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Results/",
-                                data_dict=data_dict, num_aux_tokens=config.num_aux_toks,
-                                save_end_epoch=True, print_every_iterations=100, reset_global_step=True)
+    train_class.train_iteration(epoch_start=0, epoch_end=10, iteration_counter=0,
+                                save_filepath_train="/data/kkno604/Language_model_experiments/Wikitext103/GPT2_update_weights/Resultsgpttrue/",
+                                save_filepath_val="/data/kkno604/Language_model_experiments/Wikitext103/GPT2_update_weights/Resultsgpttrue/",
+                                data_dict=data_dict, num_aux_tokens=config.num_aux_toks, save_end_epoch=True)

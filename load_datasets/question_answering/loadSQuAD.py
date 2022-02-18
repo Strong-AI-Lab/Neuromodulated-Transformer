@@ -604,11 +604,11 @@ class SQuADDataLoader:
 
         #if need to shuffle, do it in parent class.
 
-        if mode == "training" or mode == "val" or mode == "test":
+        if mode == "training" or mode == "val" or mode == "valid":
             for item in self.data:
-                #print(f"item: {item}")
+
                 for paragraph in item["paragraphs"]: #{dict}
-                    #print(f"paragraph: {paragraph}")
+
                     context = paragraph["context"]
                     quest_ = ""
                     answer = ""
@@ -619,7 +619,6 @@ class SQuADDataLoader:
                             for z in range(len(qas["answers"])):
                                 answer = qas["answers"][z]["text"]
 
-                                #print(f"\n\nanswer: {answer}\n\n")
                                 tmp = self.p1 + " " + context + " " + self.question + " " + quest_ + " " + self.sep_tok
                                 tmp_label = answer + " " + self.end_tok
 
@@ -648,7 +647,9 @@ class SQuADDataLoader:
                                     input_id), f"The length of the label ({len(label_)} doesn't match the length " \
                                                f"of the input id ({len(input_id)})"
                                 sample_weights = [1]  # A placeholder for if it is needed layer on...
-                                aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
+                                #aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
+                                aux_label = input_id[1:] + [self.pad_tok_id]
+                                # [pad_tok_id: </s> pred/output is None]
                                 assert len(aux_label) == len(input_id)
 
                                 #print(f"passage+question: {tmp}\n"
@@ -657,7 +658,7 @@ class SQuADDataLoader:
                                 #      f"label_: {label_}")
 
                                 yield input_string, input_id, label_, aux_label, \
-                                      sample_weights, self.dec_tok_id, self.mqa_tok_id
+                                      sample_weights, self.dec_tok_id, self.gqa_tok_id
                         elif qas["is_impossible"] is True:
                             assert len(qas["answers"]) == 0
                             #if len(qas["answers"]) > 1: print("More than one answer given, choosing the first.")  # this should not be reached in the training set.
@@ -691,7 +692,9 @@ class SQuADDataLoader:
                             assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
                                            f"of the input id ({len(input_id)})"
                             sample_weights = [1]  # A placeholder for if it is needed layer on...
-                            aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
+                            #aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
+                            aux_label = input_id[1:] + [self.pad_tok_id]
+                            # [pad_tok_id: </s> pred/output is None]
                             assert len(aux_label) == len(input_id)
 
                             #print(f"passage+question: {tmp}\n"
@@ -700,8 +703,61 @@ class SQuADDataLoader:
                             #      f"label_: {label_}")
 
                             yield input_string, input_id, label_, aux_label, \
-                                  sample_weights, self.dec_tok_id, self.mqa_tok_id
+                                  sample_weights, self.dec_tok_id, self.gqa_tok_id
             yield None, None, None, None, None, None, None
+        elif mode == "test":
+            for item in self.data:
+
+                for paragraph in item["paragraphs"]: #{dict}
+
+                    context = paragraph["context"]
+                    quest_ = ""
+                    for qas in paragraph["qas"]: #[{questions:"",id:"",answers:[{text:'',answer_start}]},is_impossible:bool, plausible_answers:[same as answers list.]]
+                        quest_ = qas["question"]
+                        if qas["is_impossible"] is not True:
+                            #for z in range(len(qas["answers"])):
+                            answers = [qas["answers"][z]["text"] for z in range(len(qas["answers"]))] # list of strings.
+                            if len(answers) < 6: answers += ["<pad>" for _ in range(6-len(answers))]
+
+                            tmp = self.p1 + " " + context + " " + self.question + " " + quest_ + " " + self.sep_tok
+                            data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(tmp,
+                                                                                                max_seq_len=10000000)  # [0] is ids [1] is string version...
+
+                            if len(data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
+                                # note: if >= above, then case when they are equal causes the first element to be doubled twice...
+                                # > is ok as the first element will never be reached, hence ok to add back in as done below.
+                                input_string = [data_id_string[1][0]] + (data_id_string[1])[-(self.seq_len-1):]  # if overflow then remove parts of the passage
+                            else:
+                                input_string = data_id_string[1]
+
+                            if len(data_id_string[0]) > self.seq_len:  # handles overflow.
+                                input_id = [data_id_string[0][0]] + (data_id_string[0])[-(self.seq_len-1):]  # if overflow then remove parts of the passage
+                            else:
+                                input_id = data_id_string[0]
+                            #print(f"answers: {answers}")
+                            yield input_string, input_id, answers, self.dec_tok_id, self.mqa_tok_id
+                        elif qas["is_impossible"] is True:
+                            assert len(qas["answers"]) == 0
+
+                            tmp = self.p1 + " " + context + " " + self.question + " " + quest_ + " " + self.sep_tok
+                            answers = ["" for _ in range(6)] #list of empty string(s).
+
+                            data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(tmp, max_seq_len=10000000)  # [0] is ids [1] is string version...
+
+                            if len(data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
+                                # note: if >= above, then case when they are equal causes the first element to be doubled twice...
+                                # > is ok as the first element will never be reached, hence ok to add back in as done below.
+                                input_string = [data_id_string[1][0]] + (data_id_string[1])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                            else:
+                                input_string = data_id_string[1]
+
+                            if len(data_id_string[0]) > self.seq_len:  # handles overflow.
+                                input_id = [data_id_string[0][0]] + (data_id_string[0])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                            else:
+                                input_id = data_id_string[0]
+                            #print(f"answers: {answers}")
+                            yield input_string, input_id, answers, self.dec_tok_id, self.gqa_tok_id
+            yield None, None, None, None, None
 
 
 

@@ -1,3 +1,5 @@
+import copy
+
 import tensorflow as tf
 import numpy as np
 import re
@@ -124,7 +126,7 @@ class NMTransformer(tf.keras.Model):
             #print(f"\n\n\n\nself.vanilla_set.transformer.wte: {self.vanilla_set.transformer.wte.weights[0].shape[0]}\n\n\n\n")
             # below updates the weights to our new vocabulary.
             self.vanilla_set.transformer.wte.set_weights([tf.concat([old_embeddings_weights,
-                                                                            self.vanilla_set.transformer.wte.weights[0][old_embeddings_weights.shape[0]:, :]],
+                                                                     self.vanilla_set.transformer.wte.weights[0][old_embeddings_weights.shape[0]:, :]],
                                                                                                        axis=0)])
 
             # The bare GPT2 Model transformer outputting raw hidden-states without any specific head on top.
@@ -146,6 +148,32 @@ class NMTransformer(tf.keras.Model):
 
         self.final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01))
         self.vanilla_set_final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01))
+
+    def set_output_layers_equal_to_lm(self, lm_key):
+        keys = self.output_layers.keys()
+        lm_output_set = self.output_layers[lm_key] # this is hardcoded.
+        for key in keys:
+            if key == lm_key: continue
+            else:
+                self.output_layers[key] = lm_output_set
+                self.output_layers[key]._name = str(key)+" output_set"
+                print(f"{self.output_layers[key]} name: {self.output_layers[key].name}")
+
+
+
+    def build_custom(self, cls_tok_id, dec_tok_id, lst_of_task_ids, minval=1, maxval=24):
+        x = tf.cast(tf.random.uniform((1, self.max_seq_len_dec), minval=minval, maxval=maxval), dtype=tf.dtypes.int64)
+        for id_ in lst_of_task_ids:
+            y = tf.concat([tf.cast(tf.convert_to_tensor([[cls_tok_id, dec_tok_id, id_]]), dtype=tf.dtypes.int64),x], axis=-1)
+            #print(f"id_: {id_}")
+            output = self.run_no_rs(y, training=False, mask=None, gpt_pad_mask=None, fixed_output=False,
+                                    stop_gradient=False)
+            #print(f"\nREACH\n")
+
+
+
+
+
 
     def call(self, str_inp, id_inp, training, mask, gpt_pad_mask=None, reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
              fixed_output=False, stop_gradient=True):
@@ -180,7 +208,8 @@ class NMTransformer(tf.keras.Model):
         if not reading_strat_mc_bool:
             task_prediction, attention_weights, vanilla_set_output, gating_weights = self.run_no_rs(id_inp, training,
                                                                                                     mask, gpt_pad_mask,
-                                                                                                    fixed_output, stop_gradient)
+                                                                                                    fixed_output,
+                                                                                                    stop_gradient)
             if vanilla_set_aux_loss_bool:
                 vanilla_set_output = tf.nn.softmax(self.vanilla_set_final_layer(vanilla_set_output), axis=-1)
                 # (batch_size, max_seq_len_dec, target_vocab_size)
@@ -201,8 +230,8 @@ class NMTransformer(tf.keras.Model):
     def run_no_rs(self, id_inp, training, mask, gpt_pad_mask, fixed_output, stop_gradient):
         id_orig = id_inp
         if id_inp.shape[0] != 0:
-            mode_id = tf.stop_gradient(id_inp[0, 1])  # first batch item and the (second) item in the sequence. <dec> <lm> <rs> ...
-        else: mode_id = tf.zeros(1)
+            mode_id = tf.stop_gradient(id_inp[0, 2])  # first batch item and the (third) item in the sequence. <cls> <dec> <lm>
+        else: mode_id = tf.zeros(1) # so no error when batch size is zero in multi-gpu training.
         ## NOTE (important): that in a batch only one mode_id is supported.
 
         # note: if using gpt2 then embedding doesn't utilize non auxiliary tokens.
@@ -211,24 +240,34 @@ class NMTransformer(tf.keras.Model):
         if not self.gpt2_bool: id_inp = self._pos_encoding_helper(id_inp, training, self.max_seq_len_nm)
 
         attention_weights = {}
-        if mask.shape[-2] == 1:
-            vanilla_mask = mask[:, :, :, -self.max_seq_len_dec:]
-        else:
-            vanilla_mask = mask[:, :, -self.max_seq_len_dec:, -self.max_seq_len_dec:]
+        vanilla_mask = None
+        if mask is not None:
+            if mask.shape[-2] == 1:
+                vanilla_mask = mask[:, :, :, -self.max_seq_len_dec:]
+            else:
+                vanilla_mask = mask[:, :, -self.max_seq_len_dec:, -self.max_seq_len_dec:]
 
         if not self.gpt2_bool:
             vanilla_output, attn_weights_vanilla = self.vanilla_set_run(id_inp[:, -self.max_seq_len_dec:, :], training,
                                                                         vanilla_mask)
-        else:
+        else: # gpt2=True
             attn_weights_vanilla=None
             vanilla_output = None
             if stop_gradient: # stop_gradient doubles up here if we are using gpt2, no need to define another variable as it makes no difference.
-                vanilla_output = tf.stop_gradient(self._vanilla_gpt_helper(id_orig[:,-self.max_seq_len_dec:], training, gpt_pad_mask[:,-self.max_seq_len_dec:]))
-            else: vanilla_output = self._vanilla_gpt_helper(id_orig[:,-self.max_seq_len_dec:], training, gpt_pad_mask[:,-self.max_seq_len_dec:])
+                if gpt_pad_mask is None:
+                    vanilla_output = tf.stop_gradient(
+                        self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training, None))
+                else:
+                    vanilla_output = tf.stop_gradient(self._vanilla_gpt_helper(id_orig[:,-self.max_seq_len_dec:], training,
+                                                                           gpt_pad_mask[:,-self.max_seq_len_dec:]))
+            else:
+                if gpt_pad_mask is None:
+                    vanilla_output = self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training, None)
+                else:
+                    vanilla_output = self._vanilla_gpt_helper(id_orig[:,-self.max_seq_len_dec:], training,
+                                                              gpt_pad_mask[:,-self.max_seq_len_dec:])
         # vanilla_output.shape = (batch_size, max_seq_len_dec, d_model)
 
-        # don't want the vanilla_output gradient flowing back through the nm_inp
-        #Below has had stop_gradient commented out...
         if stop_gradient: #== True
             # note: if stop gradient with gpt2 model, then stopping gradient here does nothing as it has already been stopped.
             nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], tf.stop_gradient(vanilla_output)], axis=1)
@@ -305,14 +344,15 @@ class NMTransformer(tf.keras.Model):
                         vanilla_set_aux_loss_bool=False, fixed_output=False, stop_gradient=False,
                         pad_tok_id=None, end_tok_id=None, gen_len_max=50):
 
-        #str_inp, id_inp, training, mask, gpt_pad_mask = None, reading_strat_mc_bool = False, vanilla_set_aux_loss_bool = False,
-        #fixed_output = False, stop_gradient = True
+        # TODO add support for reading strategies and metacognition.
+
+        if training: print(f"\ntraining is True meaning that dropout layers are turned on, is this what you want?\n")
 
         batch_size_ = id_inp.shape[0]
 
         generation_done = set()
         # id_inp includes the auxliary token.
-        generated_ids = [[] for _ in range(id_inp.shape[0])]
+        generated_ids = [[] for _ in range(id_inp.shape[0])] # list that contains generated ids for each batch.
 
         #num_aux_toks = abs(nm_inp.shape[1] - dec_inp.shape[1])
         #self.num_aux_toks
@@ -325,35 +365,37 @@ class NMTransformer(tf.keras.Model):
             if i > 0:  # i.e. not the first input which is correct.
                 assert len(outer_id_inp) > 0, f"Error: outer_dec_inp is empty!"
                 id_inp = tf.cast(tf.convert_to_tensor(np.asarray(outer_id_inp)), dtype=tf.dtypes.int64)
-                #nm_inp = tf.cast(tf.convert_to_tensor(np.asarray(outer_nm_inp)), dtype=tf.dtypes.int64)
-                assert id_inp.shape[0] == batch_size_, f"new decoder input batch size {id_inp.shape[0]} doesn't match the correct batch size {batch_size_}" \
-                                              f"\n {print(id_inp.shape)}"
+                assert id_inp.shape[1] == self.max_seq_len_nm, f"The id_inp.shape[1] should be equal to the nm_max_sl!"
+                assert id_inp.shape[0] == batch_size_, f"new input batch size {id_inp.shape[0]} doesn't match the " \
+                                                       f"previous batch size {batch_size_}" \
+                                                       f"\n {print(id_inp.shape)}"
 
+                # create new padding masks for new id_inp with new generated tokens.
                 gpt_pad_mask = create_padding_mask_gpt(id_inp, padding_id=pad_tok_id)
                 mask = create_combined_mask(id_inp, pad_tok_id, self.num_aux_toks)  # [batch_size, 1, seq_len, seq_len]
 
             new_id_inp = []
-            #new_nm_inp = []
 
             #id_inp, training, mask, gpt_pad_mask, fixed_output, stop_gradient
             task_prediction, _, _, _ = self.run_no_rs(id_inp=id_inp, training=training, mask=mask,
                                                       gpt_pad_mask=gpt_pad_mask, fixed_output=fixed_output,
                                                       stop_gradient=stop_gradient)
-            # TODO add support for metacognition elements... do once that are done in the call function...
             # task_prediction.shape = (batch_size, max_seq_len_dec, target_vocab_size)
+            #print(f"task_prediction: {task_prediction.numpy().tolist()}")
 
             for b in range(batch_size_):
 
                 if b in generation_done:
                     new_id_inp.append(id_inp[b, :].numpy().tolist())  # no changes here.
-                    #new_nm_inp.append(nm_inp[b, :].numpy().tolist())  # no changes to be made here.
                     continue  # generation is done for this batch item.
 
                 ## get new prediction and add to first pad index... stop when end_tok_id is reached or gen_len_max is reached. (add another outside loop)
                 id_prediction, pred_index, end, first_pad_element = self._get_pred_id_helper(
                     tf.expand_dims(task_prediction[b, :, :], axis=0),
-                    tf.expand_dims(id_inp[b, self.num_aux_toks:], axis=0), pad_tok_id, end_tok_id)  #
-                #print(f"id_prediction {id_prediction}\tend_tok_id {end_tok_id}")
+                    tf.expand_dims(id_inp[b, self.num_aux_toks:], axis=0),
+                    pad_tok_id)
+
+                # Note: that the end token is not appended to the generated tokens list.
                 if id_prediction == end_tok_id:
                     # print(f"b: {b} is finished, shouldn't see it processed any more!")
                     new_id_inp.append(id_inp[b, :].numpy().tolist())  # no changes made here.
@@ -361,47 +403,45 @@ class NMTransformer(tf.keras.Model):
                     generation_done.add(b)
                     continue
 
-                # add new prediction to dec_inp and nm_inp, if no pad token, i.e. at max seq length then remove 1st item to make room...
-                # update the padding mask or generate a new one... need to handle graph generation... # can just add to the current mask...
+                # add new prediction to id_inp, if no pad token at the max seq length, then remove 1st item to make room...
                 id_inp_np = id_inp[b, :].numpy().tolist()  # 1D list (of integers).
-                #nm_inp_np = nm_inp[b, :].numpy().tolist()  # 1D list (of integers).
                 new_input = None
                 if end:  # move all to the left once and append the prediction to the end.
                     new_input = id_inp_np[:self.num_aux_toks] + id_inp_np[self.num_aux_toks+1:] + [id_prediction]
                 else:
                     if pred_index is not None:
-                        # +1 becuase pred_index is the index we want to include up to, however rhs of : is not inclusive
+                        # +1 becuase pred_index is the index we want to include up to, however, rhs of : is not inclusive
                         # so add a 1 here to include this index, which represents the last non pad_id token...
-                        # the lhs of : is inclusive so +2 is correct (instead of plus 3) as the difference is two between
-                        # [id_prediction].
-                        new_input = id_inp_np[:self.num_aux_toks+pred_index+1] + [id_prediction] + id_inp_np[self.num_aux_toks+pred_index+2:]
-                        #print(f"id_inp_np: {id_inp_np} \n new_input: {new_input}")
+                        # the lhs of : is inclusive so +2 is correct.
+                        new_input = id_inp_np[:self.num_aux_toks+pred_index+1] + [id_prediction] + \
+                                    id_inp_np[self.num_aux_toks+pred_index+2:]
                     # else: # is handled below with first_pad_element.
 
                 if first_pad_element:  # also means pred_index will be None. handles one case above.
                     assert pred_index is None, f"pred_index should be None, got {pred_index}!"
-                    new_input = id_inp  # reset to all pad tokens, nothing happens.
+                    new_input = id_inp_np  # reset to all pad tokens, nothing happens.
                     generation_done.add(b)  # all pad tokens, thus just skip. This is a set so no duplicates.
 
                 assert new_input is not None, f"new_input should not be None, something went wrong in the code logic!"
 
-                # print(f"new_input: {new_input}")
                 new_id_inp.append(new_input)
-                #print(f"b: {b}")
-                generated_ids[b].append(id_prediction)  # note: we continue above when reach end token...
+                if id_prediction != end_tok_id: # don't want the end tokens in the prediction.
+                    generated_ids[b].append(id_prediction)
 
             outer_id_inp = new_id_inp
-            #outer_nm_inp = new_nm_inp
 
             if len(generation_done) >= batch_size_: break  # we are done here.
         return generated_ids
 
-    def _get_pred_id_helper(self, prediction, id_inp, pad_tok_id, end_tok_id):
-        assert prediction.shape[0] == 1, f"The first dimension, the batch size should be equal to 1 for the prediction vector, got {prediction.shape[0]}!"
-        assert id_inp.shape[0] == 1, f"The first dimension, the batch size should be equal to 1 for the model input, got {id_inp.shape[0]}!"
+    def _get_pred_id_helper(self, prediction, id_inp, pad_tok_id):
+
+        assert prediction.shape[0] == 1, f"The first dimension, the batch size should be equal to 1 for the " \
+                                         f"prediction vector, got {prediction.shape[0]}!"
+        assert id_inp.shape[0] == 1, f"The first dimension, the batch size should be equal to 1 for the model " \
+                                     f"input, got {id_inp.shape[0]}!"
 
         pred_index = None
-        for i in range(1, id_inp.shape[1]):
+        for i in range(1, id_inp.shape[1]): # iterate across the sequence length.
             if id_inp[0, i] == pad_tok_id:
                 pred_index = i-1  # we get the prediction at the previous token.
                 break
@@ -410,6 +450,7 @@ class NMTransformer(tf.keras.Model):
 
         end = None
         if pred_index is not None:
+            #print(f"prediction vocabulary: {prediction[0, pred_index, -100:].numpy().tolist()}")
             id_prediction = tf.argmax(prediction[0, pred_index, :])
             end = False
         else:  # is None.

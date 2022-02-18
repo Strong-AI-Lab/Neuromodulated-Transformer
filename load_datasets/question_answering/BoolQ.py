@@ -12,14 +12,11 @@ import copy
 
 sys.path.append("../..")
 
-from transformers import TransfoXLTokenizer
-from text_processing.tokenizer import Tokenizer
-
 from models.config_model import *
 
 class BoolQDataLoader:
     '''
-    The implementation of a dataloader for the SQuAD dataset to be utilzed by another higher level data loader.
+    The implementation of a dataloader for the BoolQ dataset to be utilzed by another higher level data loader.
     '''
 
     def __init__(self, strategy: str, filepath: str, enc_tok: str, dec_tok: str, mlm_tok: str, lm_tok: str,
@@ -33,19 +30,9 @@ class BoolQDataLoader:
                  unk_rs: str, aoint_rs: str, highlighting_rs: str, reread_rs: str, summarize_rs: str,
                  paraphrase_rs: str, tokenizer=None):
 
-        #super(SQuADDataLoader, self).__init__(strategy, filepath, enc_tok, dec_tok, mlm_tok, lm_tok,
-        #         start_tok, end_tok, cls_tok, sep_tok, mask_tok, pad_tok, seq_len, pad,
-        #         a1, a2, a3, a4, a5, a6, a7, a8, a9, passage, p1, p2, p3, p4, p5, p6, p7, p8, p9,
-        #         mqa, pmqa, bmqa, peentailment, pbentailment, pcoreference, bcoreference, psentiment, pgqa,
-        #         psqa, gqa, pbqa, placeholder, translation, hypothesis, question, metacognition, unk_rs, aoint_rs,
-        #         highlighting_rs, reread_rs, summarize_rs,paraphrase_rs, tokenizer=None, num_ans_options=5)
-
-        # note: self.filenames is useless in parent class...
-
         self.data = None
 
         self.filepath = filepath # path to the file containing the data.
-        # self.filepath_list = [listf for listf in listdir(self.filepath) if isfile(join(self.filepath, listf))]
         self.strategy = strategy  # train, validation, test -- train and validation will be the same.
 
         self.enc_tok = enc_tok
@@ -599,7 +586,10 @@ class BoolQDataLoader:
 
         if mode == "train" or mode == "val":
             for dict_ in self.data:
-                answer = "yes" if dict_["answer"] else "no"
+                if "answer" in dict_.keys():
+                    answer = "yes" if dict_["answer"] else "no"
+                elif "label" in dict_.keys():
+                    answer = "yes" if dict_["label"] else "no"
                 answer = answer + " " + self.end_tok
                 inp_ = self.p1 + " " + dict_["passage"] + " " + self.question + \
                     " " + dict_["question"] + " " + self.sep_tok
@@ -630,12 +620,68 @@ class BoolQDataLoader:
                                f"of the input id ({len(input_id)})"
 
                 sample_weights = [1]  # A placeholder for if it is needed layer on...
-                aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
+                #aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
+                aux_label = input_id[1:] + [self.pad_tok_id]
+                # [pad_tok_id: </s> pred/output is None]
                 assert len(aux_label) == len(input_id)
 
                 yield input_string, input_id, label_, aux_label, \
                       sample_weights, self.dec_tok_id, self.gqa_tok_id
-        yield None, None, None, None, None, None, None
+            yield None, None, None, None, None, None, None
+        if mode == "test":
+            for dict_ in self.data:
+                if "answer" in dict_.keys():
+                    answer = "yes" if dict_["answer"] else "no"
+                elif "label" in dict_.keys():
+                    answer = "yes" if dict_["label"] else "no"
+                #answer = answer + " " + self.end_tok
+                inp_ = self.p1 + " " + dict_["passage"] + " " + self.question + \
+                    " " + dict_["question"] + " " + self.sep_tok
+
+                data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(inp_, max_seq_len=10000000)  # [0] is ids [1] is string version...
+                #label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(answer, max_seq_len=1000000)
+
+                if len(data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
+                    # note: if >= above, then case when they are equal causes the first element to be doubled twice...
+                    # > is ok as the first element will never be reached, hence ok to add back in as done below.
+                    input_string = [data_id_string[1][0]] + (data_id_string[1])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                else:
+                    input_string = data_id_string[1]
+
+                if len(data_id_string[0]) > self.seq_len:  # handles overflow.
+                    input_id = [data_id_string[0][0]] + (data_id_string[0])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                else:
+                    input_id = data_id_string[0]
+
+                yield input_string, input_id, answer, self.dec_tok_id, self.gqa_tok_id
+            yield None, None, None, None, None
+
+        if mode == "test_no_answer": # {"idx": 0, "label": "true"} need to generate this answer.
+            for dict_ in self.data:
+                idx = str(dict_["idx"])
+                inp_ = self.p1 + " " + dict_["passage"] + " " + self.question + \
+                       " " + dict_["question"] + " " + self.sep_tok
+
+                data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(inp_,
+                                                                                    max_seq_len=10000000)  # [0] is ids [1] is string version...
+                # label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(answer, max_seq_len=1000000)
+
+                if len(data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
+                    # note: if >= above, then case when they are equal causes the first element to be doubled twice...
+                    # > is ok as the first element will never be reached, hence ok to add back in as done below.
+                    input_string = [data_id_string[1][0]] + (data_id_string[1])[-(
+                                self.seq_len - 1):]  # if overflow then remove parts of the passage
+                else:
+                    input_string = data_id_string[1]
+
+                if len(data_id_string[0]) > self.seq_len:  # handles overflow.
+                    input_id = [data_id_string[0][0]] + (data_id_string[0])[-(
+                                self.seq_len - 1):]  # if overflow then remove parts of the passage
+                else:
+                    input_id = data_id_string[0]
+
+                yield input_string, input_id, idx, self.dec_tok_id, self.gqa_tok_id
+            yield None, None, None, None
 
 
 
@@ -707,7 +753,8 @@ if __name__ == "__main__":
     num_aux_toks = 3
 
     dloader = BoolQDataLoader(strategy=None,
-                             filepath="/large_data/BoolQ/train.jsonl",
+                             #filepath="/large_data/BoolQ/train.jsonl",
+                              filepath = "/large_data/BoolQ_test/test.jsonl",
                              enc_tok=enc_tok, dec_tok=dec_tok,
                              mlm_tok=mlm_tok, lm_tok=lm_tok,
                              start_tok=start_tok, end_tok=end_tok,
@@ -741,7 +788,7 @@ if __name__ == "__main__":
                              paraphrase_rs=paraphrase_rs,
                              tokenizer=config.tokenizer)
 
-    mini_gen = dloader("train", True)
+    mini_gen = dloader("test_no_answer", True)
     print(next(mini_gen))
 
 

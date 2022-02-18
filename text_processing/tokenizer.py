@@ -120,14 +120,13 @@ class Tokenizer(object):
         return self.tokenizer.tokenize(input) # this is for the reading stratetgies later, need the original word when it is unknown.
     # encode_single_string_only ['the', 'lakers', 'are', 'the', 'best', 'team', 'in', 'the', 'nba', '!']
 
-    #TODO add in decoding methods.
     def batch_decode(self, input):
         # list of list of integers.
-        return self.tokenizer.batch_decode(input)
+        return self.tokenizer.batch_decode(input) # returns a list of strings.
 
     def decode(self, input):
         # list of integers
-        return self.tokenizer.decode(input, skip_special_tokens=True)
+        return self.tokenizer.decode(input, skip_special_tokens=True) # returns a string.
 
 if __name__ == "__main__":
 

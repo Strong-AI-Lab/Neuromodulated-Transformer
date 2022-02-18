@@ -35,8 +35,8 @@ class DecoderLayerPostLN(tf.keras.layers.Layer):
         self.mha = MultiHeadAttention(d_model, num_heads)
         self.ffn = FeedForwardNetwork(d_model, dff, "vanilla")
 
-        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6, input_shape=(d_model,))
-        self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6, input_shape=(d_model,))
+        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-5, input_shape=(d_model,))
+        self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-5, input_shape=(d_model,))
 
         self.dropout1 = tf.keras.layers.Dropout(rate=rate, input_shape=(d_model,))
         self.dropout2 = tf.keras.layers.Dropout(rate=rate, input_shape=(d_model,))

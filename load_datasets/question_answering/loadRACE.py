@@ -656,7 +656,7 @@ class RACEDataLoader:
                     label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(correct_label, max_seq_len=1000000)
 
                     start_index = data_id_string[0].index(self.a1_tok_id) # there is only one match, so .index is sufficient.
-                    end_index = len(data_id_string[0])-1 # this doesn't include the correct answer option, but does include </s> token at the end.
+                    end_index = len(data_id_string[0])-1 # this doesn't include the correct answer option and does not include <sep> token at the end.
 
                     if len(data_id_string[1]+label_data_id_string[1]) > self.seq_len: # handles if there is overflow. compress some of the passage.
                         #note: if >= above, then case when they are equal causes the first element to be doubled twice...
@@ -676,7 +676,9 @@ class RACEDataLoader:
                     assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
                                                          f"of the input id ({len(input_id)})"
                     sample_weights = [1] # A placeholder for if it is needed layer on...
-                    aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss.
+                    #aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss.
+                    aux_label = input_id[1:] + [self.pad_tok_id]
+                    # [pad_tok_id: </s> pred/output is None]
                     assert len(aux_label) == len(input_id)
                     yield input_string, input_id, label_, aux_label, [start_index, end_index], \
                           sample_weights, self.dec_tok_id, self.mqa_tok_id
@@ -732,7 +734,7 @@ class RACEDataLoader:
                     label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(correct_label, max_seq_len=1000000)
 
                     start_index = data_id_string[0].index(self.a1_tok_id) # there is only one match, so .index is sufficient.
-                    end_index = len(data_id_string[0])-1 # this doesn't include the correct answer option, but does include </s> token at the end.
+                    end_index = len(data_id_string[0])-1 # this doesn't include the correct answer option and does not include <sep> token at the end.
 
                     if len(data_id_string[1]) > self.seq_len: # handles if there is overflow. compress some of the passage.
                         #note: if >= above, then case when they are equal causes the first element to be doubled twice...
@@ -745,31 +747,22 @@ class RACEDataLoader:
                     else: input_id = data_id_string[0]
                     #print(f"Length of input_id: {len(input_id)}")
 
-                    label_ = [self.pad_tok_id for i in range(len(input_id)-len(label_data_id_string[0]))] + label_data_id_string[0] #+ [self.pad_tok_id]
-                    #         [blah, blah, ..., </s> correct_ao_1, correct_ao_2, </s>]
-                    # [<pad>, <pad>, ..., <pad>, correct_ao_1, correct_ao_2, </s>, <pad>]
+                    label_ = [self.pad_tok_id for i in range(len(input_id)-1)] + label_data_id_string[0]  # + [self.pad_tok_id]
+                    #label_ = [self.pad_tok_id for i in range(len(input_id)-len(label_data_id_string[0]))] + label_data_id_string[0] #+ [self.pad_tok_id]
+
                     #print(f"input_id: {input_id}\nlabel: {label_}")
                     assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
                                                          f"of the input id ({len(input_id)})"
+
                     sample_weights = [1] # A placeholder for if it is needed layer on...
-                    #print(f"input_string: {input_string}")
-                    #print(f"input_id: {input_id} \nlabel_: {label_}")
-                    #yield input_string, input_id, label_, [start_index, end_index], \
-                    #      sample_weights, self.dec_tok_id, self.mqa_tok_id
-                    #print(f"input_id_len: {len(input_id)}")
-                    #print(f"self.seq_len: {self.seq_len}")
-                    #print(f"passage_len: {len(passage)}")
-                    #print(f"passage: {passage} \n\n\n")
-                    #print(f"input_string: {input_string} \n"
-                    #      f"input_string.len: {len(input_string)}")
-                    #print(f"label_: {label_}\n"
-                    #      f"label_len: {len(label_)}")
-                    aux_label = input_id[1:] + [label_[-1]] # auxiliary loss.
+
+                    #aux_label = input_id[1:] + [label_[-1]] # auxiliary loss.
+                    aux_label = input_id[1:] + [self.pad_tok_id]  # auxiliary loss.
+                    # [pad_tok_id: <sep> pred/output is None]
                     assert len(aux_label) == len(input_id)
-                    #print(f"input_string: {input_string} {len(input_string)}")
-                    #print(f"label: {label_} {len(label_)}")
+
                     yield input_string, input_id, label_, aux_label, [start_index, end_index], \
-                         sample_weights, self.dec_tok_id, self.lm_tok_id #TODO
+                         sample_weights, self.dec_tok_id, self.mqa_tok_id
             yield None, None, None, None, None, None, None, None
         elif mode == "test":
             for item in self.filenames:
@@ -827,7 +820,7 @@ class RACEDataLoader:
                     data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(input_, max_seq_len=10000000) # [0] is ids [1] is string version...
 
                     start_index = data_id_string[0].index(self.a1_tok_id)  # there is only one match, so .index is sufficient.
-                    end_index = len(data_id_string) - 1  # this doesn't include the correct answer option, but does include </s> token at the end.
+                    end_index = len(data_id_string[0]) - 1 # this doesn't include the correct answer option and does not include <sep> token at the end.
 
                     if len(data_id_string[1]) > self.seq_len: # handles if there is overflow. compress some of the passage.
                         #note: if >= above, then case when they are equal causes the first element to be doubled twice...
@@ -843,5 +836,5 @@ class RACEDataLoader:
 
                     # all_labels is a string of all answer options one after another.
                     # label is a string representing the correct label (only).
-                    yield input_string, input_id, all_labels, label, [start_index, end_index], self.dec_tok_id, self.mqa_tok_id
+                    yield input_string, input_id, all_labels, label, [start_index, end_index], self.dec_tok_id, self.mqa_tok_id#self.mqa_tok_id TODO
             yield None, None, None, None, None, None, None

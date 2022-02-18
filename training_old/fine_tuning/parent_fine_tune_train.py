@@ -12,6 +12,7 @@ import numpy as np
 import math
 import time
 import re
+import rouge
 
 #import checkmate
 #from chedecckmate import BestCheckPointSaver
@@ -248,9 +249,6 @@ class ParentFineTuningNL:
             #    loss_aux, size_aux = self.loss_function(label_id, vanilla_set_output, self.loss_object, self.padding_id)
             #    loss_aux_ = loss_aux / size_aux
             #    loss_ = loss_ + (loss_aux_*self.lambda_)
-
-        gradients = tape.gradient(loss_, self.model.trainable_variables)
-        self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
         loss = tf.convert_to_tensor([loss], dtype=tf.dtypes.float32)
         size = tf.convert_to_tensor([size], dtype=tf.dtypes.float32)
@@ -690,6 +688,9 @@ class ParentFineTuningNL:
         correct_samples = 0  # get the number of correct answers to questions.
         total_samples = 0  # the total number of correct questions.
         for (input_string, input_id, all_labels, correct_ao, aoint_indices) in data:  # note: in all labels #TODO -> remove aoint_indices.
+
+            #TODO: test step types: [mqa-no-end-tok], [f1-score] [em-score] [f1-score and em-score] [bool-end_tok]
+            # TODO: [ROUGE-L] for abstraction - extract match metric (em score)
 
             if test_step_type == "generate":
                 correct, total = self._distributed_test_step_generate(input_string, input_id, all_labels, correct_ao,
