@@ -27,7 +27,8 @@ tf.config.run_functions_eagerly(False)
 
 from training.fine_tuning.fine_tuning_class import * #FineTuningClass
 #from training.pre_training.pre_train_class import *
-from models.NMTransformer import *
+#from models.NMTransformer import *
+from models.GPT_baseline_model import *
 from models.config_model import *
 from models.custom_lr_schedules import CosineDecayLW
 from load_datasets.MasterDataLoader import *
@@ -57,29 +58,14 @@ if __name__ == "__main__":
     transformer, optimizer = None, None
     if strategy is not None:
         with strategy.scope():
-            transformer = NMTransformer(num_layers_vanilla=config.num_layers_vanilla, num_layers_nm=config.num_layers_nm,
-                                        num_layers_mc=config.num_layers_mc, num_layers_output=config.num_layers_output,
-                                        d_model=config.d_model, num_heads=config.num_heads, dff=config.dff,
-                                        input_vocab_size=config.input_vocab_size, output_vocab_size=config.output_vocab_size,
-                                        max_position_encoding=config.max_position_encoding,
-                                        max_seq_len_dec=config.max_seq_len_dec, num_aux_toks=config.num_aux_toks,
-                                        mask_strategy=config.mask_strategy, rate=config.rate,
-                                        parallel_layers=config.parallel_layers, output_layers=config.output_layers,
-                                        aux_tok_output_layer_map=config.aux_tok_output_layer_map, mode_ids=config.mode_ids,
-                                        gpt2_117=config.gpt2_117)
+            transformer = GPT2Class(d_model=1024, input_vocab_size=config.input_vocab_size,
+                                    output_vocab_size=config.output_vocab_size, max_seq_len_dec=config.max_seq_len_dec,
+                                    num_aux_toks=3, gpt_pretrained_model="gpt2-medium")
             optimizer = tf.keras.optimizers.Adam(config.learning_rate)
     else:
-        transformer = NMTransformer(num_layers_vanilla=config.num_layers_vanilla, num_layers_nm=config.num_layers_nm,
-                                    num_layers_mc=config.num_layers_mc, num_layers_output=config.num_layers_output,
-                                    d_model=config.d_model, num_heads=config.num_heads, dff=config.dff,
-                                    input_vocab_size=config.input_vocab_size,
-                                    output_vocab_size=config.output_vocab_size,
-                                    max_position_encoding=config.max_position_encoding,
-                                    max_seq_len_dec=config.max_seq_len_dec, num_aux_toks=config.num_aux_toks,
-                                    mask_strategy=config.mask_strategy, rate=config.rate,
-                                    parallel_layers=config.parallel_layers, output_layers=config.output_layers,
-                                    aux_tok_output_layer_map=config.aux_tok_output_layer_map, mode_ids=config.mode_ids,
-                                    gpt2_117=config.gpt2_117)
+        transformer = GPT2Class(d_model=1024, input_vocab_size=config.input_vocab_size,
+                                output_vocab_size=config.output_vocab_size, max_seq_len_dec=config.max_seq_len_dec,
+                                num_aux_toks=3, gpt_pretrained_model="gpt2-medium")
         optimizer = tf.keras.optimizers.Adam(config.learning_rate)
 
     filepaths = {"SQuAD_train_default": "/large_data/SQuAD 2.0/train-v2.0.json",
@@ -96,21 +82,20 @@ if __name__ == "__main__":
     if strategy is not None:
         data_dict["test"] = strategy.experimental_distribute_dataset(data_dict["test"])
 
-    for i in range(11,21):
+    for i in range(1,21):
 
         train_class = FineTuningClass(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
                                       checkpoint_path_recent="/home/kkno604/Documents/V4 results/Specific-fine-tuning/SQuAD/Checkpoints/",
                                       strategy=strategy, pad_token="<pad>", end_tok="</s>",
                                       recent_to_keep=20, load_recent=False,
-                                      load_specific_path="/home/kkno604/Documents/V4 results/Specific-fine-tuning/SQuAD/Checkpoints/ckpt-"+str(200+i), # 220 max...
-                                      #load_specific_path="/home/kkno604/Documents/V4 results/Specific-fine-tuning/SQuAD/Checkpoints/saved_checkpoints/ckpt-203",
+                                      load_specific_path="/data/kkno604/Specific-fine-tuning-baseline/SQuAD/Checkpoints/ckpt-"+str(i),
                                       enc_tok="<enc>", dec_tok="<dec>",
-                                      output_layer_name="lm", fixed_output=True, stop_gradient=False,
+                                      output_layer_name=None, fixed_output=False, stop_gradient=False,
                                       reading_strat_mc_bool=False, lambda_vanilla_set=0.5, lambda_lm=0.2,
                                       vanilla_set_aux_loss_bool=False,
                                       lm_aux_loss_global=False, train_cutoff=0)
 
-        train_class.get_test_results(e=0, save_filepath="/home/kkno604/Documents/V4 results/Specific-fine-tuning/SQuAD/Results/val/",
-                                     data=data_dict["test"], num_aux_tokens=config.num_aux_toks, max_generate_len=50,
+        train_class.get_test_results(e=0, save_filepath="/data/kkno604/Specific-fine-tuning-baseline/SQuAD/Results/val/",
+                                     data=data_dict["test"], num_aux_tokens=config.num_aux_toks, max_generate_len=100,
                                      filename_prefix="epoch-"+str(i)+"-f1-score", metrics=["f1-score","", "",
                                                                              ""], mode="GQA", multiple_answers=True)

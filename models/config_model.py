@@ -149,6 +149,7 @@ class V4ConfigMediumSize(object):
         self.mode_ids[self.summarize_rs] = self.summarize_rs_id
         self.mode_ids[self.paraphrase_rs] = self.paraphrase_rs_id
 
+'''
 class V4Wikitext103Medium(object):
 
     def __init__(self, strategy, batch_size, loss_object, learning_rate,
@@ -285,4 +286,4 @@ class V4Wikitext103Medium(object):
         self.mode_ids[self.highlighting_rs] = self.highlighting_rs_id
         self.mode_ids[self.summarize_rs] = self.summarize_rs_id
         self.mode_ids[self.paraphrase_rs] = self.paraphrase_rs_id
-
+'''

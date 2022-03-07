@@ -29,6 +29,7 @@ from models.NMTransformer import *
 from models.config_model import *
 from models.custom_lr_schedules import CosineDecayLW
 from load_datasets.MasterDataLoader import *
+from models.GPT_baseline_model import *
 
 #tf.keras.backend.clear_session()
 
@@ -57,34 +58,17 @@ if __name__ == "__main__":
     summarize_rs_tok_id = config.tokenizer.encode_single("<summarize_rs>")[0]
     paraphrase_rs_tok_id = config.tokenizer.encode_single("<paraphrase_rs>")[0]
 
-
     transformer, optimizer = None, None
     if strategy is not None:
         with strategy.scope():
-            transformer = NMTransformer(num_layers_vanilla=config.num_layers_vanilla, num_layers_nm=config.num_layers_nm,
-                                        num_layers_mc=config.num_layers_mc, num_layers_output=config.num_layers_output,
-                                        d_model=config.d_model, num_heads=config.num_heads, dff=config.dff,
-                                        input_vocab_size=config.input_vocab_size, output_vocab_size=config.output_vocab_size,
-                                        max_position_encoding=config.max_position_encoding,
-                                        max_seq_len_dec=config.max_seq_len_dec, num_aux_toks=config.num_aux_toks,
-                                        mask_strategy=config.mask_strategy, rate=config.rate,
-                                        parallel_layers=config.parallel_layers, output_layers=config.output_layers,
-                                        aux_tok_output_layer_map=config.aux_tok_output_layer_map, mode_ids=config.mode_ids,
-                                        gpt2_117=config.gpt2_117)
+            transformer = GPT2Class(d_model=1024, input_vocab_size=config.input_vocab_size,
+                                    output_vocab_size=config.output_vocab_size, max_seq_len_dec=config.max_seq_len_dec,
+                                    num_aux_toks=3, gpt_pretrained_model="gpt2-medium")
             optimizer = tf.keras.optimizers.Adam(config.learning_rate)
-
     else:
-        transformer = NMTransformer(num_layers_vanilla=config.num_layers_vanilla, num_layers_nm=config.num_layers_nm,
-                                    num_layers_mc=config.num_layers_mc, num_layers_output=config.num_layers_output,
-                                    d_model=config.d_model, num_heads=config.num_heads, dff=config.dff,
-                                    input_vocab_size=config.input_vocab_size,
-                                    output_vocab_size=config.output_vocab_size,
-                                    max_position_encoding=config.max_position_encoding,
-                                    max_seq_len_dec=config.max_seq_len_dec, num_aux_toks=config.num_aux_toks,
-                                    mask_strategy=config.mask_strategy, rate=config.rate,
-                                    parallel_layers=config.parallel_layers, output_layers=config.output_layers,
-                                    aux_tok_output_layer_map=config.aux_tok_output_layer_map, mode_ids=config.mode_ids,
-                                    gpt2_117=config.gpt2_117)
+        transformer = GPT2Class(d_model=1024, input_vocab_size=config.input_vocab_size,
+                                output_vocab_size=config.output_vocab_size, max_seq_len_dec=config.max_seq_len_dec,
+                                num_aux_toks=3, gpt_pretrained_model="gpt2-medium")
         optimizer = tf.keras.optimizers.Adam(config.learning_rate)
 
     filepaths = {"NarrativeQA_train": "/large_data/NarrativeQA/narrativeqa-master/",
@@ -111,26 +95,20 @@ if __name__ == "__main__":
         data_dict["train"] = strategy.experimental_distribute_dataset(data_dict["train"])
 
     train_class = FineTuningClass(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
-                                  checkpoint_path_recent="/home/kkno604/Documents/V4 results/General-fine-tuning/Default/Checkpoints/",
+                                  checkpoint_path_recent="/data/kkno604/General-fine-tuning/gpt2-medium/Checkpoints/",
                                   strategy=strategy, pad_token="<pad>", end_tok="</s>",
                                   recent_to_keep=20, load_recent=False,
-                                  # load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain-C4-v4-gpt2/ckpt-48",
-                                  load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/gpt-2-saved-checkpoints/ckpt-200",
-                                  #load_specific_path="",
+                                  load_specific_path="",
                                   enc_tok="<enc>", dec_tok="<dec>",
-                                  output_layer_name=None, fixed_output=False, stop_gradient=False,
+                                  output_layer_name=None, fixed_output=True, stop_gradient=False,
                                   reading_strat_mc_bool=False, lambda_vanilla_set=0.5, lambda_lm=0.2,
-                                  vanilla_set_aux_loss_bool=True, train_vanilla_set_only_on_task=False,
-                                  lm_aux_loss_global=True, train_cutoff=0)
+                                  vanilla_set_aux_loss_bool=False,
+                                  lm_aux_loss_global=True, train_cutoff=0,
+                                  train_vanilla_set_only_on_task=False, gpt_baseline=True)
 
-    # converts all output decoder parallel layers to the lm one that was pre-trained on.
-    with strategy.scope():
-        transformer.set_output_layers_equal_to_lm("lm")
-        transformer.build_custom(cls_tok_id, dec_tok_id, [lm_tok_id, mqa_tok_id, dec_tok_id, highlighting_rs_tok_id,
-                                                          summarize_rs_tok_id, paraphrase_rs_tok_id])
 
     train_class.train_iteration_GENERAL(epoch_start=0, epoch_end=1,
-                                        save_filepath_train="/home/kkno604/Documents/V4 results/General-fine-tuning/Default/Results/testing",
+                                        save_filepath_train="/data/kkno604/General-fine-tuning/gpt2-medium/Results/",
                                         data_dict=data_dict,
                                         num_aux_tokens=config.num_aux_toks, print_every_iterations=100,
                                         reset_global_step=True, reset_value=0,

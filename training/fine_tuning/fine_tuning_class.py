@@ -102,7 +102,8 @@ class FineTuningClass:
                  enc_tok=None, dec_tok=None, output_layer_name="lm",
                  fixed_output=True, stop_gradient=False, reading_strat_mc_bool=False,
                  vanilla_set_aux_loss_bool=False, lambda_vanilla_set=0.5, lambda_lm=0.1,
-                 lm_aux_loss_global=False, train_cutoff=0, train_vanilla_set_only_on_task=False):
+                 lm_aux_loss_global=False, train_cutoff=0, train_vanilla_set_only_on_task=False,
+                 gpt_baseline=False):
 
         self.model = model
         self.optimizer = optimizer
@@ -178,7 +179,9 @@ class FineTuningClass:
             self.model.fixed_output_layer = self.model.output_layers[output_layer_name]
             assert fixed_output, f"If we are setting a specific output layer before hand, " \
                                  f"then fixed_output should be True"
-        else: assert not fixed_output, f"if output_layer_name is None, then fixed_output should not be."
+        else:
+            if not gpt_baseline:
+                assert not fixed_output, f"if output_layer_name is None, then fixed_output should not be."
 
     def create_recent_checkpoint(self, keep):
         self.ckpt = tf.train.Checkpoint(model=self.model,
@@ -313,6 +316,13 @@ class FineTuningClass:
 
                 header = True if (batch == 1 and e == 0) else False
                 self._save_iteration_loss_only("train", e+1, iteration, save_filepath_train, header, loss_)
+
+                #if iteration == 10: # just a check to see if they are different, they should be.
+                    #print(f"lm_weights: {self.model.output_layers['lm'].weights.name}\n"
+                    #      f"gqa_weights: {self.model.output_layers['gqa'].weights.name}")
+                    #print(f"\n\nAre equal? {self.model.output_layers['lm'] == self.model.output_layers['gqa']}\n\n")
+                #    print(f"\n\nlm{self.model.output_layers['lm'].weights[0]}\n\n")
+                #    print(f"\n\ngqa{self.model.output_layers['gqa'].weights[0]}\n\n")
 
             total_loss = epoch_loss_total / epoch_size_total
 
@@ -867,8 +877,15 @@ class FineTuningClass:
         for i, batch_item in enumerate(cor_label):
             correct_ans = self.tokenizer.batch_encode([batch_item])["input_ids"][0] # list of integers.
             #print(f"correct_ans \\t generated_ids: {correct_ans} \t {generated_ids[i]}")
-            if correct_ans[0] == generated_ids[i][0]:
-                correct += 1
+            try:
+                if correct_ans[0] == generated_ids[i][0]:
+                    correct += 1
+
+            except:
+                print(f"num gen_ids: {len(generated_ids)}\n"
+                      f"gen_ids: {generated_ids}\n"
+                      f"i: {i}\n"
+                      f"correct_ans: {correct_ans}")
             total += 1
         return correct, total
 
@@ -1103,7 +1120,7 @@ class FineTuningClass:
     def _GQA_accuracy_score_helper(self, generated_ids, answers_, multiple_answers):
         # this is just exact match with normalisation removed.
         generated_strings = self.tokenizer.batch_decode(generated_ids)  # list of strings for each batch item, each representing an answer.
-
+        #print(f"generated_strings: {generated_strings}")
         accuracy_sum = 0
         count = len(generated_strings)
         for i, pred_ans in enumerate(generated_strings):  # answer is a string
@@ -1132,7 +1149,7 @@ class FineTuningClass:
     # so that similar processing is done.
 
     def _f1_score_helper(self, generated_ids, answers_, multiple_answers):
-        # TODO testing still needed.
+
         generated_strings = self.tokenizer.batch_decode(generated_ids) # list of strings for each batch item, each representing an answer.
         # ["answer one with no </s>", "ansawer 2", ...]
         f1_function = lambda p, r: (2 * p * r) / (p + r)
