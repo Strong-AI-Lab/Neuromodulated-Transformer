@@ -343,12 +343,18 @@ class NMTransformer(tf.keras.Model):
 
                 # highlighting reading strategy
                 high_embeddings = self.add_highlighting_vectors(id_orig[b,self.num_aux_toks:].numpy().tolist()) # input is a 1D list.
+                if high_embeddings.shape[0] != self.max_seq_len_dec: # index is 0 b/c no batch dimension.
+                    print(f"Highlighting error: continuing without highlighting!")
+                    high_embeddings = tf.zeros(self.max_seq_len_dec, self.max_seq_len_dec)
 
                 # answer option interaction reading strategy.
                 start_end_list = self.get_start_end_question(
                     id_orig[b, self.num_aux_toks:].numpy().tolist())  # input is a 1D list.
                 new_voutput = self.aoint_helper(tf.expand_dims(vanilla_output[b, :, :], axis=0), start_end_list[0],
                                                 start_end_list[1], training) # shape already contrains the batch dimension!
+                if new_voutput.shape[1] != self.max_seq_len_dec: # index is 1 b/c a batch dimension is present.
+                    new_voutput = tf.zeros(1, self.max_seq_len_dec, self.max_seq_len_dec)
+                    print(f"Answer option interaction error: continuing without answer option interaction!")
 
                 if aoint_vanilla_output is None:
                     aoint_vanilla_output = tf.expand_dims(vanilla_output[b,:,:], axis=0) + \
@@ -360,6 +366,7 @@ class NMTransformer(tf.keras.Model):
                                                       tf.expand_dims(high_embeddings, axis=0) + \
                                                       new_voutput
                                                       ], axis=0)
+
         except:
             aoint_vanilla_output = vanilla_output
 

@@ -3,7 +3,7 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "4"
+os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 GPUS_AVAILABLE = 1
 
 import sys
@@ -77,34 +77,30 @@ if __name__ == "__main__":
                                     aux_tok_output_layer_map=config.aux_tok_output_layer_map, mode_ids=config.mode_ids,
                                     gpt2_117=config.gpt2_117, tokenizer=config.tokenizer)
         optimizer = tf.keras.optimizers.Adam(config.learning_rate)
-
-    filepaths = {"PIQA_train": {"question": "/large_data/PIQA/train.jsonl",
-                                "labels": "/large_data/PIQA/train-labels.lst"},
-                 "PIQA_val": {"question": "/large_data/PIQA/valid.jsonl",
-                              "labels": "/large_data/PIQA/valid-labels.lst"}}
-
+    #print("\n\n\nbefore training:", optimizer.iterations.numpy(), "\n\n\n")
+    filepaths = {"CQA_train": "/large_data/CommonsenseQA/train_rand_split.jsonl",
+                 "CQA_val": "/large_data/CommonsenseQA/dev_rand_split.jsonl"}
     dloader_train = ReadingStrategyDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec,
                                        batch_size=config.batch_size, tokenizer=config.tokenizer)
 
-    generator_train = dloader_train.get_generator("PIQA_train_label", True, override_lm=False).batch(config.batch_size)
+    generator_train = dloader_train.get_generator("CQA_train_label", True, override_lm=False).batch(config.batch_size)
 
     data_dict = {}
     data_dict["train"] = generator_train
     if strategy is not None:
         data_dict["train"] = strategy.experimental_distribute_dataset(data_dict["train"])
 
-    dloader_val = ReadingStrategyDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size,
-                                     tokenizer=config.tokenizer)
+    dloader_val = ReadingStrategyDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec,
+                                              batch_size=config.batch_size, tokenizer=config.tokenizer)
 
-    # generator_val = dloader_val.get_generator("RACE_combined_val", False).batch(config.batch_size)
-    generator_val = dloader_val.get_generator("PIQA_val_label", False, override_lm=False).batch(config.batch_size)
+    generator_val = dloader_val.get_generator("CQA_val_label", False, override_lm=False).batch(config.batch_size)
 
     data_dict["val"] = generator_val
     if strategy is not None:
         data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
 
     train_class = FineTuningClass(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
-                                  checkpoint_path_recent="/data/kkno604/Reading_strategy_experiments/highlighting_only/PIQA/Checkpoints/",
+                                  checkpoint_path_recent="/data/kkno604/Reading_strategy_experiments/aoint_and_highlighting/CQA/Checkpoints/",
                                   strategy=strategy, pad_token="<pad>", end_tok = "</s>",
                                   recent_to_keep=20, load_recent=False,
                                   #load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain-C4-v4-gpt2/ckpt-48",
@@ -116,10 +112,11 @@ if __name__ == "__main__":
                                   vanilla_set_aux_loss_bool=False,
                                   lm_aux_loss_global=False, train_cutoff=0,
                                   train_vanilla_set_only_on_task=False,
-                                  reading_strategy_strategy="highlighting_only")
+                                  reading_strategy_strategy="aoint_and_highlighting")
 
     train_class.train_batch_MQA_RS_noMC(epoch_start=0, epoch_end=20,
-                                save_filepath_train="/data/kkno604/Reading_strategy_experiments/highlighting_only/PIQA/Results/",
-                                save_filepath_val="/data/kkno604/Reading_strategy_experiments/highlighting_only/PIQA/Results/",
+                                save_filepath_train="/data/kkno604/Reading_strategy_experiments/aoint_and_highlighting/CQA/Results/",
+                                save_filepath_val="/data/kkno604/Reading_strategy_experiments/aoint_and_highlighting/CQA/Results/",
                                 data_dict=data_dict, num_aux_tokens=config.num_aux_toks, save_end_epoch=True,
                                 print_every_iterations=100, reset_global_step=True, reset_value=0)
+

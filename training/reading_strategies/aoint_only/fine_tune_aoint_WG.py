@@ -3,7 +3,7 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 GPUS_AVAILABLE = 1
 
 import sys
@@ -105,10 +105,10 @@ if __name__ == "__main__":
     train_class = FineTuningClass(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
                                   checkpoint_path_recent="/data/kkno604/Reading_strategy_experiments/aoint_only/WG/Checkpoints/",
                                   strategy=strategy, pad_token="<pad>", end_tok = "</s>",
-                                  recent_to_keep=20, load_recent=False,
+                                  recent_to_keep=20, load_recent=True,
                                   #load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain-C4-v4-gpt2/ckpt-48",
-                                  load_specific_path="/home/kkno604/Documents/V4 results/General-fine-tuning/Default/Checkpoints/Saved-checkpoints/ckpt-240",
-                                  #load_specific_path="",
+                                  #load_specific_path="/home/kkno604/Documents/V4 results/General-fine-tuning/Default/Checkpoints/Saved-checkpoints/ckpt-240",
+                                  load_specific_path="",
                                   enc_tok="<enc>", dec_tok="<dec>",
                                   output_layer_name=None, fixed_output=False, stop_gradient=False,
                                   reading_strat_mc_bool=True, lambda_vanilla_set=0.5, lambda_lm=0.2,
@@ -117,7 +117,7 @@ if __name__ == "__main__":
                                   train_vanilla_set_only_on_task=False,
                                   reading_strategy_strategy="aoint_only")
 
-    train_class.train_batch_MQA_RS_noMC(epoch_start=0, epoch_end=20,
+    train_class.train_batch_MQA_RS_noMC(epoch_start=15, epoch_end=20,
                                 save_filepath_train="/data/kkno604/Reading_strategy_experiments/aoint_only/WG/Results/",
                                 save_filepath_val="/data/kkno604/Reading_strategy_experiments/aoint_only/WG/Results/",
                                 data_dict=data_dict, num_aux_tokens=config.num_aux_toks, save_end_epoch=True,
