@@ -109,5 +109,5 @@ if __name__ == "__main__":
 
     train_class.get_test_results(e=0, save_filepath="/home/kkno604/Documents/V4 results/General-fine-tuning/Default/Results/SQuAD_results/val/",
                                  data=data_dict["test"], num_aux_tokens=config.num_aux_toks, max_generate_len=100,
-                                 filename_prefix="val-400k-f1-score", metrics=["f1-score","", "",
+                                 filename_prefix="val-400k-f1-score-correct", metrics=["f1-score","", "",
                                                                          ""], mode="GQA", multiple_answers=True)

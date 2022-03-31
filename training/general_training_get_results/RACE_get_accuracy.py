@@ -82,14 +82,14 @@ if __name__ == "__main__":
                                     gpt2_117=config.gpt2_117)
         optimizer = tf.keras.optimizers.Adam(config.learning_rate)
 
-    filepaths = {"RACE_high_test": "/large_data/RACE/test/high/",
-                 "RACE_middle_test": "/large_data/RACE/test/middle/"}
-    #filepaths = {"RACE_high_test": "/large_data/RACE/dev/high/",
-    #             "RACE_middle_test": "/large_data/RACE/dev/middle/"}
+    #filepaths = {"RACE_high_test": "/large_data/RACE/test/high/",
+    #             "RACE_middle_test": "/large_data/RACE/test/middle/"}
+    filepaths = {"RACE_high_test": "/large_data/RACE/dev/high/",
+                 "RACE_middle_test": "/large_data/RACE/dev/middle/"}
     dloader_test = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size, tokenizer=config.tokenizer)
 
-    generator_test = dloader_test.get_generator("RACE_middle_test", False, override_lm=False).batch(config.batch_size)
-    #generator_test = dloader_test.get_generator("RACE_high_test", False, override_lm=False).batch(config.batch_size)
+    #generator_test = dloader_test.get_generator("RACE_middle_test", False, override_lm=False).batch(config.batch_size)
+    generator_test = dloader_test.get_generator("RACE_high_test", False, override_lm=False).batch(config.batch_size)
 
     data_dict = {}
     data_dict["test"] = generator_test
@@ -107,7 +107,7 @@ if __name__ == "__main__":
                                   vanilla_set_aux_loss_bool=False,
                                   lm_aux_loss_global=False, train_cutoff=0)
 
-    train_class.get_test_results(e=0, save_filepath="/home/kkno604/Documents/V4 results/General-fine-tuning/Default/Results/RACE_results/NMT_default/test/",
+    train_class.get_test_results(e=0, save_filepath="/home/kkno604/Documents/V4 results/General-fine-tuning/Default/Results/RACE_results/NMT_default/val/",
                                  data=data_dict["test"], num_aux_tokens=config.num_aux_toks,
-                                 max_generate_len=1, filename_prefix="RACE-middle-test-400k", metrics=["accuracy"],
+                                 max_generate_len=1, filename_prefix="RACE-high-val-400k", metrics=["accuracy"],
                                  mode="MQA_label_only", multiple_answers=False)

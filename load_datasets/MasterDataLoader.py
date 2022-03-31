@@ -2,7 +2,7 @@
 File name: MasterDataLoaderTF.py
 Author: Kobe Knowles
 Date created: 26/08/21
-Data last modified: 26/08/21
+Data last modified: 30/03/22
 Python Version: 3.8
 Tensorflow version: 2.5
 '''
@@ -41,6 +41,9 @@ from load_datasets.question_answering.PIQA import PIQADataLoader
 from load_datasets.question_answering.SIQA import SIQADataLoader
 from load_datasets.question_answering.WG import WGDataLoader
 from load_datasets.question_answering.BoolQCS import BoolQCSDataLoader
+from load_datasets.question_answering.Quoref import QuorefDataLoader
+from load_datasets.question_answering.ROPES import ROPESDataLoader
+from load_datasets.question_answering.DROP import DROPDataLoader
 
 class MasterDataLoaderTF(object):
     '''
@@ -602,6 +605,116 @@ class MasterDataLoaderTF(object):
                                                                            summarize_rs=self.summarize_rs,
                                                                            paraphrase_rs=self.paraphrase_rs,
                                                                            tokenizer=self.tokenizer)
+
+            elif key == "Quoref_test":
+                self.dataLoaders["Quoref_test"] = QuorefDataLoader(strategy="test",
+                                                                           filepath=self.filepaths["Quoref_test"],
+                                                                           enc_tok=self.enc_tok, dec_tok=self.dec_tok,
+                                                                           mlm_tok=self.mlm_tok, lm_tok=self.lm_tok,
+                                                                           start_tok=self.start_tok, end_tok=self.end_tok,
+                                                                           cls_tok=self.cls_tok,
+                                                                           sep_tok=self.sep_tok, mask_tok=self.mask_tok,
+                                                                           pad_tok=self.pad_tok, seq_len=self.seq_len,
+                                                                           pad=False,
+                                                                           a1=self.a1, a2=self.a2, a3=self.a3, a4=self.a4,
+                                                                           a5=self.a5, a6=self.a6, a7=self.a7, a8=self.a8,
+                                                                           a9=self.a9,
+                                                                           passage=self.passage, p1=self.p1, p2=self.p2,
+                                                                           p3=self.p3, p4=self.p4, p5=self.p5, p6=self.p6,
+                                                                           p7=self.p7, p8=self.p8, p9=self.p9, mqa=self.mqa,
+                                                                           pmqa=self.pmqa, bmqa=self.bmqa,
+                                                                           peentailment=self.peentailment,
+                                                                           pbentailment=self.pbentailment,
+                                                                           pcoreference=self.pcoreference,
+                                                                           bcoreference=self.bcoreference,
+                                                                           psentiment=self.psentiment,
+                                                                           pgqa=self.pgqa, psqa=self.psqa, gqa=self.gqa,
+                                                                           pbqa=self.pbqa,
+                                                                           placeholder=self.placeholder,
+                                                                           translation=self.translation,
+                                                                           hypothesis=self.hypothesis,
+                                                                           question=self.question,
+                                                                           metacognition=self.metacognition,
+                                                                           unk_rs=self.unk_rs,
+                                                                           aoint_rs=self.aoint_rs,
+                                                                           highlighting_rs=highlighting_rs,
+                                                                           reread_rs=self.reread_rs,
+                                                                           summarize_rs=self.summarize_rs,
+                                                                           paraphrase_rs=self.paraphrase_rs,
+                                                                           tokenizer=self.tokenizer)
+            elif key == "ROPES_test":
+                self.dataLoaders["ROPES_test"] = ROPESDataLoader(strategy="test",
+                                                                   filepath=self.filepaths["ROPES_test"],
+                                                                   enc_tok=self.enc_tok, dec_tok=self.dec_tok,
+                                                                   mlm_tok=self.mlm_tok, lm_tok=self.lm_tok,
+                                                                   start_tok=self.start_tok, end_tok=self.end_tok,
+                                                                   cls_tok=self.cls_tok,
+                                                                   sep_tok=self.sep_tok, mask_tok=self.mask_tok,
+                                                                   pad_tok=self.pad_tok, seq_len=self.seq_len,
+                                                                   pad=False,
+                                                                   a1=self.a1, a2=self.a2, a3=self.a3, a4=self.a4,
+                                                                   a5=self.a5, a6=self.a6, a7=self.a7, a8=self.a8,
+                                                                   a9=self.a9,
+                                                                   passage=self.passage, p1=self.p1, p2=self.p2,
+                                                                   p3=self.p3, p4=self.p4, p5=self.p5, p6=self.p6,
+                                                                   p7=self.p7, p8=self.p8, p9=self.p9, mqa=self.mqa,
+                                                                   pmqa=self.pmqa, bmqa=self.bmqa,
+                                                                   peentailment=self.peentailment,
+                                                                   pbentailment=self.pbentailment,
+                                                                   pcoreference=self.pcoreference,
+                                                                   bcoreference=self.bcoreference,
+                                                                   psentiment=self.psentiment,
+                                                                   pgqa=self.pgqa, psqa=self.psqa, gqa=self.gqa,
+                                                                   pbqa=self.pbqa,
+                                                                   placeholder=self.placeholder,
+                                                                   translation=self.translation,
+                                                                   hypothesis=self.hypothesis,
+                                                                   question=self.question,
+                                                                   metacognition=self.metacognition,
+                                                                   unk_rs=self.unk_rs,
+                                                                   aoint_rs=self.aoint_rs,
+                                                                   highlighting_rs=highlighting_rs,
+                                                                   reread_rs=self.reread_rs,
+                                                                   summarize_rs=self.summarize_rs,
+                                                                   paraphrase_rs=self.paraphrase_rs,
+                                                                   tokenizer=self.tokenizer)
+
+            elif key == "DROP_test":
+                self.dataLoaders["DROP_test"] = DROPDataLoader(strategy="test",
+                                                                   filepath=self.filepaths["DROP_test"],
+                                                                   enc_tok=self.enc_tok, dec_tok=self.dec_tok,
+                                                                   mlm_tok=self.mlm_tok, lm_tok=self.lm_tok,
+                                                                   start_tok=self.start_tok, end_tok=self.end_tok,
+                                                                   cls_tok=self.cls_tok,
+                                                                   sep_tok=self.sep_tok, mask_tok=self.mask_tok,
+                                                                   pad_tok=self.pad_tok, seq_len=self.seq_len,
+                                                                   pad=False,
+                                                                   a1=self.a1, a2=self.a2, a3=self.a3, a4=self.a4,
+                                                                   a5=self.a5, a6=self.a6, a7=self.a7, a8=self.a8,
+                                                                   a9=self.a9,
+                                                                   passage=self.passage, p1=self.p1, p2=self.p2,
+                                                                   p3=self.p3, p4=self.p4, p5=self.p5, p6=self.p6,
+                                                                   p7=self.p7, p8=self.p8, p9=self.p9, mqa=self.mqa,
+                                                                   pmqa=self.pmqa, bmqa=self.bmqa,
+                                                                   peentailment=self.peentailment,
+                                                                   pbentailment=self.pbentailment,
+                                                                   pcoreference=self.pcoreference,
+                                                                   bcoreference=self.bcoreference,
+                                                                   psentiment=self.psentiment,
+                                                                   pgqa=self.pgqa, psqa=self.psqa, gqa=self.gqa,
+                                                                   pbqa=self.pbqa,
+                                                                   placeholder=self.placeholder,
+                                                                   translation=self.translation,
+                                                                   hypothesis=self.hypothesis,
+                                                                   question=self.question,
+                                                                   metacognition=self.metacognition,
+                                                                   unk_rs=self.unk_rs,
+                                                                   aoint_rs=self.aoint_rs,
+                                                                   highlighting_rs=highlighting_rs,
+                                                                   reread_rs=self.reread_rs,
+                                                                   summarize_rs=self.summarize_rs,
+                                                                   paraphrase_rs=self.paraphrase_rs,
+                                                                   tokenizer=self.tokenizer)
 
             elif key == "CQA_train":
                 self.dataLoaders["CQA_train"] = CommonsenseQADataLoader(strategy="train",
@@ -1895,6 +2008,44 @@ class MasterDataLoaderTF(object):
                 yield input_string, input_id, all_labels, correct_ao, aoint_indices
         else: raise Exception(f"Invalid mode_!")
 
+    def get_Quoref_ROPES_DROP_test(self):
+
+        mini_generator = None
+        # train and val (technically test as well) are the same, so no need to distinghuish between them
+        if self.type == "Quoref_test":
+            mini_generator = self.dataLoaders[self.type](mode="test", shuffle=self.shuffle)
+        elif self.type == "ROPES_test":
+            mini_generator = self.dataLoaders[self.type](mode="test", shuffle=self.shuffle)
+        elif self.type == "DROP_test":
+            mini_generator = self.dataLoaders[self.type](mode="test", shuffle=self.shuffle)
+
+        # Shuffling is irrelevant during testing.
+
+        while True:
+            #try: # Safety so whole training isn't stopped for one error. No error should be reached.
+            input_string, input_id, answers, aux_tok_1, aux_tok_2 = next(mini_generator)
+
+            if input_string is None or input_id is None: break
+
+            pad_tok_id = self.tokenizer.encode_single(self.pad_tok)[0]
+
+            if self.pad_to_max_length:
+                input_string = input_string + [self.pad_tok for _ in range(self.seq_len - len(input_string))]
+                input_id = input_id + [pad_tok_id for _ in range(self.seq_len - len(input_id))]
+
+            # aux_tok_1 represents the mode, i.e. the decoder <dec>
+            if self.override_lm:
+                input_id = [self.cls_tok_id, aux_tok_1, self.dataLoaders[self.type].lm_tok_id] + input_id
+            else:
+                input_id = [self.cls_tok_id, aux_tok_1, aux_tok_2] + input_id
+
+            input_string = tf.cast(tf.convert_to_tensor(input_string), dtype=tf.dtypes.string)
+            input_id = tf.cast(tf.convert_to_tensor(input_id), dtype=tf.dtypes.int64)
+            answers = tf.cast(tf.convert_to_tensor(answers), dtype=tf.dtypes.string)
+
+            yield input_string, input_id, answers
+
+
     def get_squad_test(self):
 
         mini_generator = None
@@ -1925,7 +2076,6 @@ class MasterDataLoaderTF(object):
             input_string = tf.cast(tf.convert_to_tensor(input_string), dtype=tf.dtypes.string)
             input_id = tf.cast(tf.convert_to_tensor(input_id), dtype=tf.dtypes.int64)
             answers = tf.cast(tf.convert_to_tensor(answers), dtype=tf.dtypes.string)
-
 
             yield input_string, input_id, answers
 
@@ -2970,6 +3120,12 @@ class MasterDataLoaderTF(object):
                                                                      tf.dtypes.int64))
         elif type == "SQuAD_test_default":
             generator = tf.data.Dataset.from_generator(self.get_squad_test,
+                                                       output_types=(tf.dtypes.string,
+                                                                     tf.dtypes.int64,
+                                                                     tf.dtypes.string))
+        #Quoref_test
+        elif type == "Quoref_test" or type == "ROPES_test" or type == "DROP_test":
+            generator = tf.data.Dataset.from_generator(self.get_Quoref_ROPES_DROP_test,
                                                        output_types=(tf.dtypes.string,
                                                                      tf.dtypes.int64,
                                                                      tf.dtypes.string))

@@ -735,7 +735,7 @@ class SQuADDataLoader:
                             else:
                                 input_id = data_id_string[0]
                             #print(f"answers: {answers}")
-                            yield input_string, input_id, answers, self.dec_tok_id, self.mqa_tok_id
+                            yield input_string, input_id, answers, self.dec_tok_id, self.gqa_tok_id
                         elif qas["is_impossible"] is True:
                             assert len(qas["answers"]) == 0
 

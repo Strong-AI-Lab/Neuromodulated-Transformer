@@ -48,9 +48,9 @@ if __name__ == "__main__":
     #strategy = None
 
     ### Override default sequence length 1300
-    config.max_seq_len_dec = 1300
-    config.max_seq_len_nm = config.max_seq_len_dec + config.num_aux_toks
-    config.max_position_encoding = config.max_seq_len_nm
+    #config.max_seq_len_dec = 1300
+    #config.max_seq_len_nm = config.max_seq_len_dec + config.num_aux_toks
+    #config.max_position_encoding = config.max_seq_len_nm
 
     transformer, optimizer = None, None
     if strategy is not None:

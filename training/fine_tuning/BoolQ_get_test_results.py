@@ -5,8 +5,8 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-GPUS_AVAILABLE = 1
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,6"
+GPUS_AVAILABLE = 2
 
 import sys
 sys.path.append("../..")
@@ -38,7 +38,7 @@ from load_datasets.question_answering.loadRACE import RACEDataLoader
 if __name__ == "__main__":
 
 
-    config = V4ConfigMediumSize(strategy="MirroredStrategy", batch_size=8*GPUS_AVAILABLE,
+    config = V4ConfigMediumSize(strategy="MirroredStrategy", batch_size=16*GPUS_AVAILABLE,
                                 loss_object=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False, reduction='none'),
                                 #learning_rate=tf.keras.optimizers.schedules.CosineDecay(0.0001, decay_steps=1000000),
                                 learning_rate=0.00001,
@@ -91,21 +91,21 @@ if __name__ == "__main__":
     if strategy is not None:
         data_dict["test"] = strategy.experimental_distribute_dataset(data_dict["test"])
 
-    for i in [28,29]:
+    for i in range(1,31):
 
         train_class = FineTuningClass(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
-                                      checkpoint_path_recent="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Checkpoints/",
+                                      checkpoint_path_recent="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Checkpointsv2/",
                                       strategy=strategy, pad_token="<pad>", end_tok="</s>",
-                                      recent_to_keep=20, load_recent=False,
+                                      recent_to_keep=30, load_recent=False,
                                       # load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain-C4-v4-gpt2/ckpt-48",
                                       #load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/gpt-2-saved-checkpoints/ckpt-200",
-                                      load_specific_path="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Checkpoints/ckpt-"+str(200+i),
+                                      load_specific_path="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Checkpointsv2/ckpt-"+str(200+i),
                                       enc_tok="<enc>", dec_tok="<dec>",
                                       output_layer_name="lm", fixed_output=True, stop_gradient=False,
                                       reading_strat_mc_bool=False, lambda_vanilla_set=0.5, lambda_lm=0.2,
                                       vanilla_set_aux_loss_bool=False,
                                       lm_aux_loss_global=False, train_cutoff=0)
 
-        train_class.get_test_results(e=0, save_filepath="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Results/val/",
+        train_class.get_test_results(e=0, save_filepath="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Resultsv2/val/",
                                      data=data_dict["test"], num_aux_tokens=config.num_aux_toks, max_generate_len=100,
                                      filename_prefix="val-epoch-"+str(i), metrics=["accuracy"], mode="GQA", multiple_answers=False)

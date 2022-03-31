@@ -3,6 +3,8 @@ import copy
 import tensorflow as tf
 import numpy as np
 import re
+import string
+import nltk
 
 import sys
 sys.path.append("..")
@@ -27,7 +29,8 @@ class NMTransformer(tf.keras.Model):
                  d_model, num_heads, dff, input_vocab_size, output_vocab_size, max_position_encoding=10000,
                  max_seq_len_dec=768, num_aux_toks=3, mask_strategy="default",
                  rate=0.1, parallel_layers=None, output_layers=None,
-                 aux_tok_output_layer_map={}, mode_ids={}, gpt2_117=False):
+                 aux_tok_output_layer_map={}, mode_ids={}, gpt2_117=False, tokenizer=None,
+                 a1_tok="(1)", sep_tok="<sep>", question_tok="<q>", passage1_tok="<p1>", special_toks=None):
         '''
         :param num_layers_vanilla: (int) An integer representing the number of layers in the "vanilla set".
         :param num_layers_nm: (int) An integer representing the number of layers in the "neuormodulation set".
@@ -69,6 +72,24 @@ class NMTransformer(tf.keras.Model):
         self.max_seq_len_dec = max_seq_len_dec
         self.max_seq_len_nm = max_seq_len_dec + num_aux_toks
         self.num_aux_toks = num_aux_toks # includes the mandatory <cls> token at the beginning.
+
+        if special_toks is None:
+            self.special_toks = ["<passage>", "<p1>", "<p2>", "<p3>", "<p4>", "<p5>", "<p6>", "<p7>", "<p8>", "<p9>",
+                    "<h>", "<q>", "(1)", "(2)", "(2)", "(3)", "(4)", "(5)", "(6)", "(7)", "(8)", "(9)",
+                    "<enc>", "<dec>", "<mc>", "<placeholder>",
+                    "<lm>", "<mlm>", "<mqa>", "<pmqa>", "<bmqa>", "<pbmqa>", "<peentailment>", "<pbentailment>",
+                    "<pcoreference>", "<bcoreference>", "<pbcoreference>", "<psentiment>",
+                    "<pgqa>", "<psqa>", "<gqa>", "<pbqa>", "<translation>",
+                    "<s>", "</s>", "<cls>", "<sep>", "<mask>", "<pad>", "<null>",
+                    "<unk_rs>", "<aoint_rs>", "<highlighting_rs>", "<reread_rs>", "<summarize_rs>", "<paraphrase_rs>"]
+        else: self.special_toks == special_toks
+
+        self.tokenizer = tokenizer
+        if self.tokenizer is not None:
+            self.a1_tok_id = self.tokenizer.encode_single(a1_tok)[0]
+            self.sep_tok_id = self.tokenizer.encode_single(sep_tok)[0]
+            self.question_tok_id = self.tokenizer.encode_single(question_tok)[0]
+            self.passage1_tok_id = self.tokenizer.encode_single(passage1_tok)[0]
 
         assert max_position_encoding >= self.max_seq_len_nm, f"the max_position_encoding should be greater than the max sequence" \
                                                              f" length of the nm encoder input. ({max_position_encoding} > {self.max_seq_len_nm})"
@@ -146,6 +167,21 @@ class NMTransformer(tf.keras.Model):
         self.dropout = tf.keras.layers.Dropout(rate=rate, input_shape=(d_model,))
         self.pos_encoding = positional_encoding(max_position_encoding, d_model)
 
+        self.W1 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
+        self.W2 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
+        self.W3 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
+        self.W4 = tf.keras.layers.Dense(d_model, input_shape=(d_model*2,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # input is d_model*2, just noting.
+        self.aoint_dropout = tf.keras.layers.Dropout(rate=rate, input_shape=(d_model,))
+
+        self.noun_vector = tf.Variable(tf.initializers.GlorotUniform()(shape=[d_model]), name="noun_vector")
+        self.verb_vector = tf.Variable(tf.initializers.GlorotUniform()(shape=[d_model]), name="verb_vector")
+        self.adjective_vector = tf.Variable(tf.initializers.GlorotUniform()(shape=[d_model]), name="adjective_vector")
+        self.adverb_vector = tf.Variable(tf.initializers.GlorotUniform()(shape=[d_model]), name="adverb_vector")
+        self.numerical_vector = tf.Variable(tf.initializers.GlorotUniform()(shape=[d_model]), name="numerical_vector")
+        self.foreign_word_vector = tf.Variable(tf.initializers.GlorotUniform()(shape=[d_model]), name="foreign_word_vector")
+        self.other_vector_vector = tf.Variable(tf.initializers.GlorotUniform()(shape=[d_model]), name="other_vector_vector")
+        self.special_toks_vector = tf.Variable(tf.initializers.GlorotUniform()(shape=[d_model]), name="special_toks_vector")
+
         self.final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01))
         self.vanilla_set_final_layer = tf.keras.layers.Dense(output_vocab_size, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01))
 
@@ -170,8 +206,8 @@ class NMTransformer(tf.keras.Model):
             output = self.run_no_rs(y, training=False, mask=None, gpt_pad_mask=None, fixed_output=False,
                                     stop_gradient=False)
 
-    def call(self, str_inp, id_inp, training, mask, gpt_pad_mask=None, reading_strat_mc_bool=False, vanilla_set_aux_loss_bool=False,
-             fixed_output=False, stop_gradient=True):
+    def call(self, str_inp, id_inp, training, mask, gpt_pad_mask=None, reading_strat_mc_bool=False,
+             vanilla_set_aux_loss_bool=False, fixed_output=False, stop_gradient=True, reading_strategy_strategy="none"):
         '''
         Description: One run through the NMTransformer that generates an output based on the prediction.
         :param str_inp: (tf.Tenor{tf.dtypes.string}; [batch_size, max_seq_len_nm (nothing actually enforces this)])
@@ -183,6 +219,9 @@ class NMTransformer(tf.keras.Model):
         :param reading_strat_mc_bool: (bool) A boolean value that represents if we are to process in reading strategies mode or not.
         :param vanilla_set_aux_loss_bool: (bool) A boolean value representing if we are updating the vanilla set's weights
             independently of the architecture as a whole as an auxiliary loss.
+        :param fixed_output: True if only one parallel output transformer block; False otherwise.
+        :param stop_gradient:
+        :param reading_strategy_strategy: Strategy to perform for reading strategy and metacognition aspect.
         :return:
             vanilla_set_output: (tf.Tensor; [])
         '''
@@ -211,7 +250,10 @@ class NMTransformer(tf.keras.Model):
                 # this only goes through the vanilla_decoder and final layer.
             else:
                 vanilla_set_output = None
-        else: pass
+        else:
+            task_prediction, attention_weights, vanilla_set_output, gating_weights = \
+                self.run_reading_strategies(id_inp, training, mask, gpt_pad_mask, fixed_output, stop_gradient,
+                                            reading_strategy_strategy)
 
         return vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights
 
@@ -221,6 +263,524 @@ class NMTransformer(tf.keras.Model):
         x += self.pos_encoding[:, :max_seq_len, :]
         x /= tf.math.sqrt(tf.cast(self.d_model, tf.dtypes.float32))  # re-normalize the input embeddings.
         return self.dropout(x, training=training)
+
+    def run_reading_strategies(self, id_inp, training, mask, gpt_pad_mask, fixed_output,
+                               stop_gradient, reading_strategy_strategy):
+
+        if reading_strategy_strategy == "aoint_only":
+            return self.run_aoint_only(id_inp, training, mask, gpt_pad_mask, fixed_output,
+                                        stop_gradient, reading_strategy_strategy)
+        elif reading_strategy_strategy == "highlighting_only":
+            return self.run_highlighting_only(id_inp, training, mask, gpt_pad_mask, fixed_output,
+                                        stop_gradient, reading_strategy_strategy)
+        elif reading_strategy_strategy == "paraphrase_training_only": # training on a paraphrase dataset.
+            pass #TODO
+        elif reading_strategy_strategy == "paraphrase_only": # training on MQA, and possibly some paraphrasing examples.
+            pass #TODO
+        elif reading_strategy_strategy == "summarization_training_only": # training on summarization dataset.
+            pass #TODO
+        elif reading_strategy_strategy == "summarization_only": # training on MQA, and possibly some summarization examples.
+            pass #TODO
+        elif reading_strategy_strategy == "aoint_and_highlighting":
+            task_prediction, _, _, _ = self.run_aoint_and_highlighting(id_inp, training, mask, gpt_pad_mask,
+                                                                       fixed_output,
+                                                                       stop_gradient, reading_strategy_strategy)
+        else:
+            raise Exception(f"Invalid strategy for reading strategies: {reading_strategy_strategy}")
+
+    def run_aoint_and_highlighting(self, id_inp, training, mask, gpt_pad_mask, fixed_output,
+                       stop_gradient, reading_strategy_strategy):
+
+        batch_ = id_inp.shape[0]
+        id_orig = id_inp
+        if id_inp.shape[0] != 0:
+            mode_id = tf.stop_gradient(id_inp[0, 2])  # first batch item and the (third) item in the sequence. <cls> <dec> <lm>
+        else:
+            mode_id = tf.zeros(1)  # so no error when batch size is zero in multi-gpu training.
+        ## NOTE (important): that in a batch only one mode_id is supported.
+
+        # note: if using gpt2 then embedding doesn't utilize non auxiliary tokens.
+        id_inp = self.embedding(id_inp)  # (batch_size, max_seq_len_nm, d_model)
+        # don't need positional information for aux toks, while this is handled by the gpt2 model.
+        if not self.gpt2_bool: id_inp = self._pos_encoding_helper(id_inp, training, self.max_seq_len_nm)
+
+        attention_weights = {}
+        vanilla_mask = None
+        if mask is not None:
+            if mask.shape[-2] == 1:
+                vanilla_mask = mask[:, :, :, -self.max_seq_len_dec:]
+            else:
+                vanilla_mask = mask[:, :, -self.max_seq_len_dec:, -self.max_seq_len_dec:]
+
+        if not self.gpt2_bool:
+            vanilla_output, attn_weights_vanilla = self.vanilla_set_run(id_inp[:, -self.max_seq_len_dec:, :], training,
+                                                                        vanilla_mask)
+        else:  # gpt2=True
+            attn_weights_vanilla = None
+            vanilla_output = None
+            if stop_gradient:  # stop_gradient doubles up here if we are using gpt2, no need to define another variable as it makes no difference.
+                if gpt_pad_mask is None:
+                    vanilla_output = tf.stop_gradient(
+                        self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training, None))
+                else:
+                    vanilla_output = tf.stop_gradient(
+                        self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training,
+                                                 gpt_pad_mask[:, -self.max_seq_len_dec:]))
+            else:
+                if gpt_pad_mask is None:
+                    vanilla_output = self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training, None)
+                else:
+                    vanilla_output = self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training,
+                                                              gpt_pad_mask[:, -self.max_seq_len_dec:])
+        # vanilla_output.shape = (batch_size, max_seq_len_dec, d_model)
+
+        ### Here is where answer option interaction and highlighting reading strategy are added.
+
+        aoint_vanilla_output = None
+        try:
+            for b in range(batch_):
+                # self.num_aux_toks removes the auxiliary token positions to match that of the vanilla output!!!
+
+                # highlighting reading strategy
+                high_embeddings = self.add_highlighting_vectors(id_orig[b,self.num_aux_toks:].numpy().tolist()) # input is a 1D list.
+
+                # answer option interaction reading strategy.
+                start_end_list = self.get_start_end_question(
+                    id_orig[b, self.num_aux_toks:].numpy().tolist())  # input is a 1D list.
+                new_voutput = self.aoint_helper(tf.expand_dims(vanilla_output[b, :, :], axis=0), start_end_list[0],
+                                                start_end_list[1], training) # shape already contrains the batch dimension!
+
+                if aoint_vanilla_output is None:
+                    aoint_vanilla_output = tf.expand_dims(vanilla_output[b,:,:], axis=0) + \
+                                           tf.expand_dims(high_embeddings, axis=0) + \
+                                           new_voutput
+                else:
+                    aoint_vanilla_output = tf.concat([aoint_vanilla_output,
+                                                      tf.expand_dims(vanilla_output[b, :, :], axis=0) + \
+                                                      tf.expand_dims(high_embeddings, axis=0) + \
+                                                      new_voutput
+                                                      ], axis=0)
+        except:
+            aoint_vanilla_output = vanilla_output
+
+        if stop_gradient:  # == True
+            # note: if stop gradient with gpt2 model, then stopping gradient here does nothing as it has already been stopped.
+            nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], tf.stop_gradient(aoint_vanilla_output)], axis=1)
+        else:  # == False
+            nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], aoint_vanilla_output], axis=1)
+        # nm_inp.shape = (batch_size, max_seq_len_nm, d_model)
+
+        nm_output, attn_weights_nm, mc_output_dict = self.neuromodulation_set_run(nm_inp, training, mask,
+                                                                                  mode="default")
+
+        gating_weights = tf.sigmoid(nm_output[:, -self.max_seq_len_dec:, :])
+
+        if not fixed_output:
+            output_, attn_weights_output = self.output_set_run(gating_weights * aoint_vanilla_output,
+                                                               training, vanilla_mask, mode_id)
+        else:
+            output_, attn_weights_output = self.fixed_output_set_run(gating_weights * aoint_vanilla_output,
+                                                                     training, vanilla_mask)
+
+        attention_weights["vanilla_attention_weights"] = attn_weights_vanilla
+        attention_weights["nm_attention_weights"] = attn_weights_nm
+        attention_weights["mc_output_attention_weightse"] = mc_output_dict
+        attention_weights["output_attention_weights"] = attn_weights_output
+
+        output_ = tf.nn.softmax(self.final_layer(output_), axis=-1)  # (batch_size, max_seq_len_dec, target_vocab_size)
+        # task_prediction, attention_weights, vanilla_set_output, gating_weights
+        return output_, attention_weights, vanilla_output, gating_weights
+
+    def run_highlighting_only(self, id_inp, training, mask, gpt_pad_mask, fixed_output,
+                       stop_gradient, reading_strategy_strategy):
+
+        batch_ = id_inp.shape[0]
+        id_orig = id_inp
+        if id_inp.shape[0] != 0:
+            mode_id = tf.stop_gradient(id_inp[0, 2])  # first batch item and the (third) item in the sequence. <cls> <dec> <lm>
+        else:
+            mode_id = tf.zeros(1)  # so no error when batch size is zero in multi-gpu training.
+        ## NOTE (important): that in a batch only one mode_id is supported.
+
+        # note: if using gpt2 then embedding doesn't utilize non auxiliary tokens.
+        id_inp = self.embedding(id_inp)  # (batch_size, max_seq_len_nm, d_model)
+        # don't need positional information for aux toks, while this is handled by the gpt2 model.
+        if not self.gpt2_bool: id_inp = self._pos_encoding_helper(id_inp, training, self.max_seq_len_nm)
+
+        attention_weights = {}
+        vanilla_mask = None
+        if mask is not None:
+            if mask.shape[-2] == 1:
+                vanilla_mask = mask[:, :, :, -self.max_seq_len_dec:]
+            else:
+                vanilla_mask = mask[:, :, -self.max_seq_len_dec:, -self.max_seq_len_dec:]
+
+        if not self.gpt2_bool:
+            vanilla_output, attn_weights_vanilla = self.vanilla_set_run(id_inp[:, -self.max_seq_len_dec:, :], training,
+                                                                        vanilla_mask)
+        else:  # gpt2=True
+            attn_weights_vanilla = None
+            vanilla_output = None
+            if stop_gradient:  # stop_gradient doubles up here if we are using gpt2, no need to define another variable as it makes no difference.
+                if gpt_pad_mask is None:
+                    vanilla_output = tf.stop_gradient(
+                        self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training, None))
+                else:
+                    vanilla_output = tf.stop_gradient(
+                        self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training,
+                                                 gpt_pad_mask[:, -self.max_seq_len_dec:]))
+            else:
+                if gpt_pad_mask is None:
+                    vanilla_output = self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training, None)
+                else:
+                    vanilla_output = self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training,
+                                                              gpt_pad_mask[:, -self.max_seq_len_dec:])
+        # vanilla_output.shape = (batch_size, max_seq_len_dec, d_model)
+
+        ### Here is where answer option interaction and highlighting reading strategy are added.
+
+        aoint_vanilla_output = None
+        try:
+            for b in range(batch_):
+                # self.num_aux_toks removes the auxiliary token positions to match that of the vanilla output!!!
+
+                high_embeddings = self.add_highlighting_vectors(id_orig[b,self.num_aux_toks:].numpy().tolist()) # input is a 1D list.
+
+                if aoint_vanilla_output is None:
+                    aoint_vanilla_output = tf.expand_dims(vanilla_output[b,:,:], axis=0) + \
+                                           tf.expand_dims(high_embeddings, axis=0)
+                else:
+                    aoint_vanilla_output = tf.concat([aoint_vanilla_output,
+                                                      tf.expand_dims(vanilla_output[b, :, :], axis=0) + \
+                                                      tf.expand_dims(high_embeddings, axis=0)
+                                                      ], axis=0)
+        except:
+            aoint_vanilla_output = vanilla_output
+        #if aoint_vanilla_output is not None:
+        #    assert aoint_vanilla_output.shape[0] == batch_, f"After anser option interaction, the output should be" \
+        #                                                    f" of the same batch size! {aoint_vanilla_output.shape[0]}" \
+        #                                                    f" vs {batch_}"
+        #if aoint_vanilla_output is None: aoint_vanilla_output = tf.zeros((0, self.max_seq_len_dec, self.d_model))
+        if stop_gradient:  # == True
+            # note: if stop gradient with gpt2 model, then stopping gradient here does nothing as it has already been stopped.
+            nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], tf.stop_gradient(aoint_vanilla_output)], axis=1)
+        else:  # == False
+            nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], aoint_vanilla_output], axis=1)
+        # nm_inp.shape = (batch_size, max_seq_len_nm, d_model)
+
+        nm_output, attn_weights_nm, mc_output_dict = self.neuromodulation_set_run(nm_inp, training, mask,
+                                                                                  mode="default")
+
+        gating_weights = tf.sigmoid(nm_output[:, -self.max_seq_len_dec:, :])
+
+        if not fixed_output:
+            output_, attn_weights_output = self.output_set_run(gating_weights * aoint_vanilla_output,
+                                                               training, vanilla_mask, mode_id)
+        else:
+            output_, attn_weights_output = self.fixed_output_set_run(gating_weights * aoint_vanilla_output,
+                                                                     training, vanilla_mask)
+
+        attention_weights["vanilla_attention_weights"] = attn_weights_vanilla
+        attention_weights["nm_attention_weights"] = attn_weights_nm
+        attention_weights["mc_output_attention_weightse"] = mc_output_dict
+        attention_weights["output_attention_weights"] = attn_weights_output
+
+        output_ = tf.nn.softmax(self.final_layer(output_), axis=-1)  # (batch_size, max_seq_len_dec, target_vocab_size)
+        # task_prediction, attention_weights, vanilla_set_output, gating_weights
+        return output_, attention_weights, vanilla_output, gating_weights
+
+    def add_highlighting_vectors(self, inp_list):
+        #raise Exception(f"Still needs testing/incomplete.")
+        # inp_list is a list of integers.
+        # convert inp_list to its words, then get POS tags, then add to weights based on the POS tags...
+        # How to handle the issue where words are split into bytes.
+
+        # Have a noun, verb, adjective, adverb, numerical, foreign word, and other vector for each.
+
+        # need to get something like this ['<q>', 'When', 'Ġboiling', 'Ġbutter', ',', 'Ġwhen', 'Ġit', "'s",
+        # 'Ġready', ',', 'Ġyou', 'Ġcan', '(1)', 'P', 'our', 'Ġit', 'Ġonto', 'Ġa', 'Ġplate', '(2)', 'P', 'our',
+        # 'Ġit', 'Ġinto', 'Ġa', 'Ġjar', '<sep>', '(2)']
+        # and join up words withoug Ġ - not that simple.
+        # can iterate one by one
+
+        inp_list = self.tokenizer.decode(inp_list) # convert to a string.
+        #print(f"inp_list1: {inp_list}")
+        inp_list = self.tokenizer.encode_single_string_only(inp_list) # converts to a list of strings, but it is encoded into bytes.
+        #print(f"inp_list2: {inp_list}")
+        embedding = None
+
+        ## Note: can be more efficient than below.
+        punct = string.punctuation
+        #vocab = self.tokenizer.tokenizer.get_vocab() # dictionary of "string":number|id
+        #self.special_toks
+        split_char = "Ġ"
+
+        # split character: Ġ
+        start_byte_index = 0
+        stop = False
+        prev_special_tok = False
+        process_special_tok = False
+        for i in range(0, len(inp_list)+1):
+            # +1 to upper range argument works because list range indexing upper argument can be larger than the list!
+            #pad_ = False
+            #if inp_list[i] != 0:
+            #    print(f"input_list[i]: {inp_list[i]}")
+            special_tok = False
+            if prev_special_tok:
+                stop = True
+                prev_special_tok = False
+                process_special_tok = True
+            if i != len(inp_list):
+                if split_char in inp_list[i]:
+                    stop = True
+                elif inp_list[i] in punct:
+                    stop = True
+                elif inp_list[i] in self.special_toks:
+                    #print(f"REACH: {inp_list[i]}")
+                    #special_tok = True
+                    stop = True
+                    prev_special_tok = True
+            else: stop = True
+            # <pad> is a special token.
+            #if inp_list[i] == "<pad>": # harcoded pad token
+            #    stop = True
+            #    pad_ = True
+
+            if stop:
+                comb_str = ''
+                if i == 0:
+                    #comb_str = inp_list[i]
+                    start_byte_index = 1
+                    continue
+                else:
+                    #print(f"{inp_list[start_byte_index:i]} \n{start_byte_index} {i}")
+                    for str_ in inp_list[start_byte_index:i]:
+                        comb_str += re.sub('[Ġ]', '', str_)
+                #print(f"comb_str: {comb_str}")
+                if not process_special_tok:
+                    #text = nltk.word_tokenize(comb_str)
+                    #print(f"text: {text}")
+                    pos_tag = nltk.pos_tag([comb_str])[0]
+                    #print(pos_tag)
+                    #[('And', 'CC')] is expected w/out the zero index
+                    #("and", "CC")
+
+                    #self.noun_vector
+                    #self.verb_vector
+                    #self.adjective_vector
+                    #self.adverb_vector
+                    #self.numerical_vector
+                    #self.foreign_word_vector
+                    #self.other_vector_vector
+                    #self.special_toks_vector
+
+                    if pos_tag[1] == "NN" or pos_tag[1] == "NNP" or pos_tag[1] == "NNS":
+                        if embedding is None:
+                            embedding = tf.expand_dims(self.noun_vector, axis=0) # shape = (1, d_model)
+                            for k in range(start_byte_index+1,i): # i is correct here.
+                                embedding = tf.concat([embedding, tf.expand_dims(self.noun_vector, axis=0)], axis=0)
+                        else:
+                            for k in range(start_byte_index,i):
+                                embedding = tf.concat([embedding, tf.expand_dims(self.noun_vector, axis=0)], axis=0)
+                    elif pos_tag[1] == "VB" or pos_tag[1] == "VBD" or pos_tag[1] == "VBG" or pos_tag[1] == "VBN"\
+                            or pos_tag[1] == "VBP" or pos_tag[1] == "VBZ":
+                        if embedding is None:
+                            embedding = tf.expand_dims(self.verb_vector, axis=0) # shape = (1, d_model)
+                            for k in range(start_byte_index+1,i): # i is correct here.
+                                embedding = tf.concat([embedding, tf.expand_dims(self.verb_vector, axis=0)], axis=0)
+                        else:
+                            for k in range(start_byte_index,i):
+                                embedding = tf.concat([embedding, tf.expand_dims(self.verb_vector, axis=0)], axis=0)
+                    elif pos_tag[1] == "RB" or pos_tag[1] == "RBR" or pos_tag[1] == "RBS":
+                        if embedding is None:
+                            embedding = tf.expand_dims(self.adverb_vector, axis=0) # shape = (1, d_model)
+                            for k in range(start_byte_index+1,i): # i is correct here.
+                                embedding = tf.concat([embedding, tf.expand_dims(self.adverb_vector, axis=0)], axis=0)
+                        else:
+                            for k in range(start_byte_index,i):
+                                embedding = tf.concat([embedding, tf.expand_dims(self.adverb_vector, axis=0)], axis=0)
+                    elif pos_tag[1] == "JJ" or pos_tag[1] == "JJR" or pos_tag[1] == "JJS":
+                        if embedding is None:
+                            embedding = tf.expand_dims(self.adjective_vector, axis=0) # shape = (1, d_model)
+                            for k in range(start_byte_index+1,i): # i is correct here.
+                                embedding = tf.concat([embedding, tf.expand_dims(self.adjective_vector, axis=0)], axis=0)
+                        else:
+                            for k in range(start_byte_index,i):
+                                embedding = tf.concat([embedding, tf.expand_dims(self.adjective_vector, axis=0)], axis=0)
+                    elif pos_tag[1] == "CD": # CD represents numerical
+                        if embedding is None:
+                            embedding = tf.expand_dims(self.numerical_vector, axis=0) # shape = (1, d_model)
+                            for k in range(start_byte_index+1,i): # i is correct here.
+                                embedding = tf.concat([embedding, tf.expand_dims(self.numerical_vector, axis=0)], axis=0)
+                        else:
+                            for k in range(start_byte_index,i):
+                                embedding = tf.concat([embedding, tf.expand_dims(self.numerical_vector, axis=0)], axis=0)
+                    elif pos_tag[1] == "FW": # FW represents foreign
+                        if embedding is None:
+                            embedding = tf.expand_dims(self.foreign_word_vector, axis=0) # shape = (1, d_model)
+                            for k in range(start_byte_index+1,i): # i is correct here.
+                                embedding = tf.concat([embedding, tf.expand_dims(self.foreign_word_vector, axis=0)], axis=0)
+                        else:
+                            for k in range(start_byte_index,i):
+                                embedding = tf.concat([embedding, tf.expand_dims(self.foreign_word_vector, axis=0)], axis=0)
+                    else:
+                        if embedding is None:
+                            embedding = tf.expand_dims(self.other_vector_vector, axis=0) # shape = (1, d_model)
+                            for k in range(start_byte_index+1,i): # i is correct here.
+                                embedding = tf.concat([embedding, tf.expand_dims(self.other_vector_vector, axis=0)], axis=0)
+                        else:
+                            for k in range(start_byte_index,i):
+                                embedding = tf.concat([embedding, tf.expand_dims(self.other_vector_vector, axis=0)], axis=0)
+                else: # special_tok is True
+                    if embedding is None:
+                        embedding = tf.expand_dims(self.special_toks_vector, axis=0)  # shape = (1, d_model)
+                        for k in range(start_byte_index + 1, i):  # i is correct here.
+                            embedding = tf.concat([embedding, tf.expand_dims(self.special_toks_vector, axis=0)], axis=0)
+                    else:
+                        for k in range(start_byte_index, i):
+                            embedding = tf.concat([embedding, tf.expand_dims(self.special_toks_vector, axis=0)], axis=0)
+                    process_special_tok = False
+                #if i == 0: start_byte_index = 1
+                start_byte_index = i
+                stop = False
+        #print(f"embedding matrix shape: {embedding.shape}")
+        return embedding
+
+    def run_aoint_only(self, id_inp, training, mask, gpt_pad_mask, fixed_output,
+                       stop_gradient, reading_strategy_strategy):
+
+        batch_ = id_inp.shape[0]
+        id_orig = id_inp
+        if id_inp.shape[0] != 0:
+            mode_id = tf.stop_gradient(id_inp[0, 2])  # first batch item and the (third) item in the sequence. <cls> <dec> <lm>
+        else:
+            mode_id = tf.zeros(1)  # so no error when batch size is zero in multi-gpu training.
+        ## NOTE (important): that in a batch only one mode_id is supported.
+
+        # note: if using gpt2 then embedding doesn't utilize non auxiliary tokens.
+        id_inp = self.embedding(id_inp)  # (batch_size, max_seq_len_nm, d_model)
+        # don't need positional information for aux toks, while this is handled by the gpt2 model.
+        if not self.gpt2_bool: id_inp = self._pos_encoding_helper(id_inp, training, self.max_seq_len_nm)
+
+        attention_weights = {}
+        vanilla_mask = None
+        if mask is not None:
+            if mask.shape[-2] == 1:
+                vanilla_mask = mask[:, :, :, -self.max_seq_len_dec:]
+            else:
+                vanilla_mask = mask[:, :, -self.max_seq_len_dec:, -self.max_seq_len_dec:]
+
+        if not self.gpt2_bool:
+            vanilla_output, attn_weights_vanilla = self.vanilla_set_run(id_inp[:, -self.max_seq_len_dec:, :], training,
+                                                                        vanilla_mask)
+        else:  # gpt2=True
+            attn_weights_vanilla = None
+            vanilla_output = None
+            if stop_gradient:  # stop_gradient doubles up here if we are using gpt2, no need to define another variable as it makes no difference.
+                if gpt_pad_mask is None:
+                    vanilla_output = tf.stop_gradient(
+                        self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training, None))
+                else:
+                    vanilla_output = tf.stop_gradient(
+                        self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training,
+                                                 gpt_pad_mask[:, -self.max_seq_len_dec:]))
+            else:
+                if gpt_pad_mask is None:
+                    vanilla_output = self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training, None)
+                else:
+                    vanilla_output = self._vanilla_gpt_helper(id_orig[:, -self.max_seq_len_dec:], training,
+                                                              gpt_pad_mask[:, -self.max_seq_len_dec:])
+        # vanilla_output.shape = (batch_size, max_seq_len_dec, d_model)
+
+        ### Here is where answer option interaction and highlighting reading strategy are added.
+
+        aoint_vanilla_output = None
+        try:
+            for b in range(batch_):
+                # self.num_aux_toks removes the auxiliary token positions to match that of the vanilla output!!!
+                start_end_list = self.get_start_end_question(id_orig[b,self.num_aux_toks:].numpy().tolist()) # input is a 1D list.
+
+                new_voutput = self.aoint_helper(tf.expand_dims(vanilla_output[b,:,:], axis=0), start_end_list[0], start_end_list[1], training)
+                if aoint_vanilla_output is None:
+                    aoint_vanilla_output = new_voutput
+                else:
+                    aoint_vanilla_output = tf.concat([aoint_vanilla_output, new_voutput], axis=0)
+        except:
+            aoint_vanilla_output = vanilla_output
+        #if aoint_vanilla_output is not None:
+        #    assert aoint_vanilla_output.shape[0] == batch_, f"After anser option interaction, the output should be" \
+        #                                                    f" of the same batch size! {aoint_vanilla_output.shape[0]}" \
+        #                                                    f" vs {batch_}"
+        #if aoint_vanilla_output is None: aoint_vanilla_output = tf.zeros((0, self.max_seq_len_dec, self.d_model))
+
+        if stop_gradient:  # == True
+            # note: if stop gradient with gpt2 model, then stopping gradient here does nothing as it has already been stopped.
+            nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], tf.stop_gradient(aoint_vanilla_output)], axis=1)
+        else:  # == False
+            nm_inp = tf.concat([id_inp[:, :self.num_aux_toks, :], aoint_vanilla_output], axis=1)
+        # nm_inp.shape = (batch_size, max_seq_len_nm, d_model)
+
+        nm_output, attn_weights_nm, mc_output_dict = self.neuromodulation_set_run(nm_inp, training, mask,
+                                                                                  mode="default")
+
+        gating_weights = tf.sigmoid(nm_output[:, -self.max_seq_len_dec:, :])
+
+        if not fixed_output:
+            output_, attn_weights_output = self.output_set_run(gating_weights * aoint_vanilla_output,
+                                                               training, vanilla_mask, mode_id)
+        else:
+            output_, attn_weights_output = self.fixed_output_set_run(gating_weights * aoint_vanilla_output,
+                                                                     training, vanilla_mask)
+
+        attention_weights["vanilla_attention_weights"] = attn_weights_vanilla
+        attention_weights["nm_attention_weights"] = attn_weights_nm
+        attention_weights["mc_output_attention_weightse"] = mc_output_dict
+        attention_weights["output_attention_weights"] = attn_weights_output
+
+        output_ = tf.nn.softmax(self.final_layer(output_), axis=-1)  # (batch_size, max_seq_len_dec, target_vocab_size)
+        # task_prediction, attention_weights, vanilla_set_output, gating_weights
+        return output_, attention_weights, vanilla_output, gating_weights
+
+    def get_start_end_question(self, id_inp):
+        if self.tokenizer is None: raise Exception(f"The tokenizer should not be None!")
+
+        # get id of first answer option token
+        start_index, end_index = 0, 0
+        try:
+            start_index = id_inp.index(self.a1_tok_id)
+            end_index = id_inp.index(self.sep_tok_id)
+        except:
+            print("setting start_index and end_index to 0!")
+
+        return [start_index, end_index]
+
+    def get_start_end_summarize(self, id_inp):
+        if self.tokenizer is None: raise Exception(f"The tokenizer should not be None!")
+
+        start_index, end_index = 0, 0
+
+        # get id of first answer option token
+        try:
+            start_index = id_inp.index(self.passage1_tok_id)
+            end_index = id_inp.index(self.question_tok_id)
+        except:
+            print("setting start_index and end_index to 0!")
+
+        return [start_index, end_index]
+
+    def get_start_end_paraphrase(self, id_inp):
+        if self.tokenizer is None: raise Exception(f"The tokenizer should not be None!")
+
+        start_index, end_index = 0, 0
+
+        # get id of first answer option token
+        try:
+            start_index = id_inp.index(self.question_tok_id)
+            end_index = id_inp.index(self.a1_tok_id)
+        except:
+            print("setting start_index and end_index to 0!")
+
+        return [start_index, end_index]
 
     def run_no_rs(self, id_inp, training, mask, gpt_pad_mask, fixed_output, stop_gradient):
         id_orig = id_inp
@@ -308,6 +868,40 @@ class NMTransformer(tf.keras.Model):
     def _vanilla_gpt_helper(self, input_ids, training, mask):
         return self.vanilla_set(input_ids=input_ids, attention_mask=mask, training=training)['last_hidden_state']
 
+    def aoint_helper(self, x, start, end, training):
+        '''
+        Desription: Helper function that runs the answer option interaction reading strategy. \n
+        :param x: (tf.Tensor; [batch_size, seq_len, d_model]) A tensor representing the input to the decoder.
+        :param start: (int) An integer specifying the start of the question in the input (inlcusive).
+        :param end: (int) An integer specifying the end of the questions in the input (non-inclusive).
+        :return: (tf.Tensor; [batch_size, seq_len, d_model])
+        '''
+        if end == 0:
+            return x
+        else:
+            seq_len = x.shape[1]
+            x_ans = x[:, start:end, :]
+            #print(f"x_ans shape {x_ans.shape}")
+
+            H1 = self.W1(x_ans) # (batch_size, seq_len_ans, d_model)
+            H2 = self.W2(x_ans) # (batch_size, seq_len_ans, d_model)
+
+            G = tf.nn.softmax(tf.matmul(self.W3(H1), H2, transpose_b=True), axis=-1) # (batch_size, seq_len_ans, seq_len_ans)
+            H_int = tf.maximum(tf.matmul(G, H2), 0) # (batch_size, seq_len_ans, d_model) # this is just performing the ReLU.
+
+            # concat along the dimension (d_model) axis. (batch_size, seq_len_ans, d_model*2)
+            g = tf.sigmoid(self.W4(tf.concat([H_int, H1], axis=-1))) # (batch_sise, seq_len_ans, d_model)
+
+            x_new = (g * H1) + ((1-g) * H_int) # (batch_size, seq_len_ans, d_model)
+
+            x = tf.concat([x[:, :start, :],
+                           x_new,
+                           x[:, end:, :]], axis=1)
+            x = self.aoint_dropout(x, training=training)
+            assert x.shape[1] == seq_len, f"The number of tokens has changed. Input: {seq_len} Output: {x.shape[1]}"
+            assert len(x[:, end:, :].shape) == 3
+            return x
+
     # includes auxiliary tokens.
     def neuromodulation_set_run(self, id_inp, training, mask, mode):
         return self.nm_set(id_inp, training, mask, mode=mode)
@@ -320,9 +914,9 @@ class NMTransformer(tf.keras.Model):
         #print(f"\n\n{self.aux_tok_output_layer_map.keys()}\n\n")
         #print(f"\n\n{self.aux_tok_output_layer_map.keys()}\n\n")
         mode_id = mode_id.numpy().tolist()
-        assert isinstance(mode_id, int)
+        #assert isinstance(mode_id, int)
         key_ = self.aux_tok_output_layer_map[mode_id]
-        assert isinstance(key_, str)
+        #assert isinstance(key_, str)
         return self.output_layers[key_](id_inp, training, mask)
 
     def fixed_output_set_run(self, id_inp, training, mask):
@@ -337,9 +931,7 @@ class NMTransformer(tf.keras.Model):
 
     def generate_answer(self, str_inp, id_inp, training, mask, gpt_pad_mask=None, reading_strat_mc_bool=False,
                         vanilla_set_aux_loss_bool=False, fixed_output=False, stop_gradient=False,
-                        pad_tok_id=None, end_tok_id=None, gen_len_max=50):
-
-        # TODO add support for reading strategies and metacognition.
+                        pad_tok_id=None, end_tok_id=None, gen_len_max=50, reading_strategy_strategy="none"):
 
         if training: print(f"\ntraining is True meaning that dropout layers are turned on, is this what you want?\n")
 
@@ -372,9 +964,29 @@ class NMTransformer(tf.keras.Model):
             new_id_inp = []
 
             #id_inp, training, mask, gpt_pad_mask, fixed_output, stop_gradient
-            task_prediction, _, _, _ = self.run_no_rs(id_inp=id_inp, training=training, mask=mask,
-                                                      gpt_pad_mask=gpt_pad_mask, fixed_output=fixed_output,
-                                                      stop_gradient=stop_gradient)
+
+            if reading_strategy_strategy == "aoint_only":
+                task_prediction, _, _, _ = self.run_aoint_only(id_inp, training, mask, gpt_pad_mask, fixed_output,
+                                           stop_gradient, reading_strategy_strategy)
+            elif reading_strategy_strategy == "highlighting_only":
+                task_prediction, _, _, _ =  self.run_highlighting_only(id_inp, training, mask, gpt_pad_mask, fixed_output,
+                                                  stop_gradient, reading_strategy_strategy)
+            elif reading_strategy_strategy == "paraphrase_training_only":  # training on a paraphrase dataset.
+                pass  # TODO
+            elif reading_strategy_strategy == "paraphrase_only":  # training on MQA, and possibly some paraphrasing examples.
+                pass  # TODO
+            elif reading_strategy_strategy == "summarization_training_only":  # training on summarization dataset.
+                pass  # TODO
+            elif reading_strategy_strategy == "summarization_only":  # training on MQA, and possibly some summarization examples.
+                pass  # TODO
+            elif reading_strategy_strategy == "aoint_and_highlighting":
+                task_prediction, _, _, _ = self.run_aoint_and_highlighting(id_inp, training, mask, gpt_pad_mask,
+                                                                      fixed_output,
+                                                                      stop_gradient, reading_strategy_strategy)
+            else:
+                task_prediction, _, _, _ = self.run_no_rs(id_inp=id_inp, training=training, mask=mask,
+                                                          gpt_pad_mask=gpt_pad_mask, fixed_output=fixed_output,
+                                                          stop_gradient=stop_gradient)
             # task_prediction.shape = (batch_size, max_seq_len_dec, target_vocab_size)
             #print(f"task_prediction: {task_prediction.numpy().tolist()}")
 

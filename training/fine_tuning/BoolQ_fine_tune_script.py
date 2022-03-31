@@ -3,8 +3,8 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,3,4,6"
-GPUS_AVAILABLE = 4
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,6"
+GPUS_AVAILABLE = 2
 
 import sys
 sys.path.append("../..")
@@ -41,7 +41,7 @@ if __name__ == "__main__":
                                 #learning_rate=tf.keras.optimizers.schedules.CosineDecay(0.0001, decay_steps=1000000),
                                 #learning_rate=0.00001,
                                 learning_rate=CosineDecayLW(start_lr=0.00005, lower_bound_lr=0.00001, upper_bound_lr=0.0001,
-                                                            warmup_steps=2000, decay_steps=4000 * 30),
+                                                            warmup_steps=250, decay_steps=600 * 30),
                                 vocab_filepath="/data/kkno604/Neuromodulated-Transformer/vocabulary/vocab1.txt",
                                 gpt2_117=True,
                                 tokenizer="gpt2")
@@ -97,9 +97,9 @@ if __name__ == "__main__":
         data_dict["val"] = strategy.experimental_distribute_dataset(data_dict["val"])
 
     train_class = FineTuningClass(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
-                                  checkpoint_path_recent="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Checkpoints/",
+                                  checkpoint_path_recent="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Checkpointsv2/",
                                   strategy=strategy, pad_token="<pad>", end_tok="</s>",
-                                  recent_to_keep=20, load_recent=False,
+                                  recent_to_keep=30, load_recent=False,
                                   # load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain-C4-v4-gpt2/ckpt-48",
                                   load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/gpt-2-saved-checkpoints/ckpt-200",
                                   # load_specific_path="",
@@ -110,7 +110,7 @@ if __name__ == "__main__":
                                   lm_aux_loss_global=True, train_cutoff=0)
 
     train_class.train_batch_GQA(epoch_start=0, epoch_end=30,
-                                save_filepath_train="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Results/",
-                                save_filepath_val="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Results/",
+                                save_filepath_train="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Resultsv2/",
+                                save_filepath_val="/home/kkno604/Documents/V4 results/Specific-fine-tuning/BoolQ/Resultsv2/",
                                 data_dict=data_dict, num_aux_tokens=config.num_aux_toks,
-                                save_end_epoch=True, print_every_iterations=100, reset_global_step=True)
+                                save_end_epoch=False, print_every_iterations=100, reset_global_step=True) #TODO note save_end_epoch...

@@ -606,7 +606,12 @@ class SIQADataLoader:
         else: raise Exception(f"Invalid latin input: {latin}!")
 
     def _shuffle_data(self):
-        random.shuffle(self.data)  # shuffle in place
+
+        tmp = list(zip(self.data, self.labels))
+        random.shuffle(tmp)
+        self.data, self.labels = zip(*tmp)
+
+        #random.shuffle(self.data)  # shuffle in place
 
     def __call__(self, mode: str, shuffle: bool):
 

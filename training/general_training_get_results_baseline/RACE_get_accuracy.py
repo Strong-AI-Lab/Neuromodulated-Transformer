@@ -3,7 +3,7 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 GPUS_AVAILABLE = 1
 
 import sys
@@ -68,10 +68,10 @@ if __name__ == "__main__":
                                 num_aux_toks=3, gpt_pretrained_model="gpt2-medium")
         optimizer = tf.keras.optimizers.Adam(config.learning_rate)
 
-    filepaths = {"RACE_high_test": "/large_data/RACE/test/high/",
-                 "RACE_middle_test": "/large_data/RACE/test/middle/"}
-    #filepaths = {"RACE_high_test": "/large_data/RACE/dev/high/",
-    #             "RACE_middle_test": "/large_data/RACE/dev/middle/"}
+    #filepaths = {"RACE_high_test": "/large_data/RACE/test/high/",
+    #             "RACE_middle_test": "/large_data/RACE/test/middle/"}
+    filepaths = {"RACE_high_test": "/large_data/RACE/dev/high/",
+                 "RACE_middle_test": "/large_data/RACE/dev/middle/"}
     dloader_test = MasterDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec, batch_size=config.batch_size, tokenizer=config.tokenizer)
 
     #generator_test = dloader_test.get_generator("RACE_middle_test", False, override_lm=False).batch(config.batch_size)
@@ -93,7 +93,7 @@ if __name__ == "__main__":
                                   vanilla_set_aux_loss_bool=False,
                                   lm_aux_loss_global=False, train_cutoff=0)
 
-    train_class.get_test_results(e=0, save_filepath="/data/kkno604/General-fine-tuning/gpt2-medium/Results/RACE_results/test/",
+    train_class.get_test_results(e=0, save_filepath="/data/kkno604/General-fine-tuning/gpt2-medium/Results/RACE_results/val/",
                                  data=data_dict["test"], num_aux_tokens=config.num_aux_toks,
-                                 max_generate_len=1, filename_prefix="RACE-high-test-400k", metrics=["accuracy"],
+                                 max_generate_len=1, filename_prefix="RACE-high-val-400k", metrics=["accuracy"],
                                  mode="MQA_label_only", multiple_answers=False)

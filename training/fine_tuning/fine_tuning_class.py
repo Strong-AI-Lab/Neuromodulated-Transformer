@@ -103,7 +103,7 @@ class FineTuningClass:
                  fixed_output=True, stop_gradient=False, reading_strat_mc_bool=False,
                  vanilla_set_aux_loss_bool=False, lambda_vanilla_set=0.5, lambda_lm=0.1,
                  lm_aux_loss_global=False, train_cutoff=0, train_vanilla_set_only_on_task=False,
-                 gpt_baseline=False):
+                 gpt_baseline=False, reading_strategy_strategy="", window_size=768):
 
         self.model = model
         self.optimizer = optimizer
@@ -117,6 +117,7 @@ class FineTuningClass:
         self.fixed_output = fixed_output
         self.stop_gradient = stop_gradient
         self.reading_strat_mc_bool = reading_strat_mc_bool
+        self.reading_strategy_strategy = reading_strategy_strategy
 
         self.vanilla_set_aux_loss_bool = vanilla_set_aux_loss_bool
         self.lambda_vanilla_set = lambda_vanilla_set
@@ -125,6 +126,8 @@ class FineTuningClass:
 
         self.train_epoch = 0
         self.train_cutoff = train_cutoff
+
+        self.window_size = window_size
 
         if train_vanilla_set_only_on_task: assert self.vanilla_set_aux_loss_bool, f"If train_vanilla_set_only_on_task" \
                                                                                   f" is True, then it is required that" \
@@ -332,11 +335,214 @@ class FineTuningClass:
             print(f'Epoch: {e+1} Loss: {total_loss:.4f}')
             print(f'Time taken for epoch {e+1}: {time.time() - start:.2f} secs\n')
 
+    def val_step_MQA_RS_noMC(self, input_string, input_id, label_id, aux_label, aoint_indices, sample_weights, num_aux_tokens):
 
+        # look ahead padding is handled by huggingface gpt2 model.
+        gpt_pad_mask = create_padding_mask_gpt(input_id, padding_id=self.padding_id)  # the model will handel whether or not to use this mask.
+        mask = create_combined_mask(input_id, padding_id=self.padding_id, num_aux_tok=num_aux_tokens)  # no look ahead padding for the num_aux_tokens auxiliary tokens.
+
+        loss, size = 0, 0
+
+        with tf.GradientTape() as tape:
+            vanilla_set_output, _, task_prediction, _, _ = self.model(input_string, input_id, training=False,
+                                                                      mask=mask,
+                                                                      gpt_pad_mask=gpt_pad_mask,
+                                                                      reading_strat_mc_bool=self.reading_strat_mc_bool,
+                                                                      vanilla_set_aux_loss_bool=self.vanilla_set_aux_loss_bool,
+                                                                      fixed_output=self.fixed_output,
+                                                                      stop_gradient=self.stop_gradient,
+                                                                      reading_strategy_strategy=self.reading_strategy_strategy)
+            # ret (vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights)
+            # vanilla_set_output is after it has been passed through dense layer if vanilla_set_aux_loss_bool is True
+
+            loss, size = self.loss_function(label_id, task_prediction, self.loss_object, self.padding_id)
+
+        loss = tf.convert_to_tensor([loss], dtype=tf.dtypes.float32)
+        size = tf.convert_to_tensor([size], dtype=tf.dtypes.float32)
+
+        return loss, size
+
+    def _distributed_val_step_MQA_RS_noMC(self, input_string, input_id, label_id, aux_label, aoint_indices,
+                                                 sample_weights, num_aux_tokens):
+        loss_dec, size_dec = None, None
+        if self.strategy is not None:
+            loss_dec, size_dec = self.strategy.run(self.val_step_MQA_RS_noMC, args=(
+                input_string, input_id, label_id, aux_label, aoint_indices, sample_weights, num_aux_tokens,))
+
+            if self.strategy.num_replicas_in_sync > 1:
+                loss_dec = tf.reduce_sum(loss_dec.values)
+                size_dec = tf.reduce_sum(size_dec.values)
+            else:
+                loss_dec = tf.reduce_sum(loss_dec)
+                size_dec = tf.reduce_sum(size_dec)
+        else:
+            loss_dec, size_dec = self.val_step_MQA_RS_noMC(input_string, input_id, label_id, aux_label, aoint_indices,
+                                                   sample_weights, num_aux_tokens)
+
+        return loss_dec, size_dec
+
+    def run_validation_MQA_RS_noMC(self, e, save_filepath_val, data, num_aux_tokens):
+
+        start = time.time()
+        epoch_loss_total = 0
+        epoch_size_total = 0
+        for (input_string, input_id, label_id, aux_label, aoint_indices, sample_weights) in data:
+
+
+            loss_dec, size_dec = self._distributed_val_step_MQA_RS_noMC(input_string, input_id, label_id,
+                                                                           aux_label, aoint_indices,
+                                                                           sample_weights, num_aux_tokens)
+            if size_dec == 0:
+                print(f"The size is zero for the currenet batch, skipping to next batch!")
+                continue
+
+            epoch_loss_total += loss_dec
+            epoch_size_total += size_dec
+
+        total_loss = epoch_loss_total / epoch_size_total
+
+        print(f'Validation Epoch: {e+1} Loss: {total_loss:.4f}')
+        print(f'Time taken for validation epoch {e+1}: {time.time()-start:.2f} secs\n')
+
+        header = True if e == 0 else False
+        self._save_epoch_loss_only("val", e+1, save_filepath_val, header, total_loss)
+
+    def train_step_MQA_RS_noMC(self, input_string, input_id, label_id, aux_label, aoint_indices, sample_weights,
+                num_aux_tokens):
+
+        # these are to not be used for RS part.
+        #assert self.reading_strat_mc_bool is False
+        assert self.vanilla_set_aux_loss_bool is False
+        assert self.train_vanilla_set_only_on_task is False
+
+        # look ahead padding is handled by huggingface gpt2 model.
+        gpt_pad_mask = create_padding_mask_gpt(input_id, padding_id=self.padding_id)  # the model will handel whether or not to use this mask.
+        mask = create_combined_mask(input_id, padding_id=self.padding_id,
+                                    num_aux_tok=num_aux_tokens)  # no look ahead padding for the num_aux_tokens auxiliary tokens.
+
+        loss, size = 0, 0
+        # if train_cutoff is set to 0, then it is always True as train_epoch is 0 at the lowest. 0<0 is False 1<0 False ...
+        # note that with tf.function it does not switch over after cutoff, so need to keep this in mind.
+        train_ = False if self.train_epoch < self.train_cutoff else True
+        assert train_ is True # hardcode here for this function only to mitigate above if incorrect...
+        with tf.GradientTape() as tape:
+            vanilla_set_output, _, task_prediction, _, _ = self.model(input_string, input_id, training=train_,
+                                                                      mask=mask,
+                                                                      gpt_pad_mask=gpt_pad_mask,
+                                                                      reading_strat_mc_bool=self.reading_strat_mc_bool,
+                                                                      vanilla_set_aux_loss_bool=self.vanilla_set_aux_loss_bool,
+                                                                      fixed_output=self.fixed_output,
+                                                                      stop_gradient=self.stop_gradient,
+                                                                      reading_strategy_strategy=self.reading_strategy_strategy)
+            # ret (vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights)
+            # vanilla_set_output is after it has been passed through dense layer if vanilla_set_aux_loss_bool is True
+
+            loss_ = None
+            loss, size = self.loss_function(label_id, task_prediction, self.loss_object, self.padding_id)
+            loss_ = loss / size
+
+        gradients = tape.gradient(loss_, self.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+
+        loss = tf.convert_to_tensor([loss], dtype=tf.dtypes.float32)
+        size = tf.convert_to_tensor([size], dtype=tf.dtypes.float32)
+
+        return loss, size
+
+    def _distributed_train_step_MQA_RS_noMC(self, input_string, input_id, label_id, aux_label, aoint_indices,
+                                            sample_weights, num_aux_tokens):
+        loss_dec, size_dec = None, None
+        if self.strategy is not None:
+            loss_dec, size_dec = self.strategy.run(self.train_step_MQA_RS_noMC, args=(
+                input_string, input_id, label_id, aux_label, aoint_indices, sample_weights,
+                num_aux_tokens,))
+
+            if self.strategy.num_replicas_in_sync > 1:
+                loss_dec = tf.reduce_sum(loss_dec.values)
+                size_dec = tf.reduce_sum(size_dec.values)
+            else:
+                loss_dec = tf.reduce_sum(loss_dec)
+                size_dec = tf.reduce_sum(size_dec)
+        else:
+            loss_dec, size_dec = self.train_step_MQA_RS_noMC(input_string, input_id, label_id, aux_label, sample_weights,
+                                                     aoint_indices, num_aux_tokens)
+
+        return loss_dec, size_dec
+
+    def train_batch_MQA_RS_noMC(self, epoch_start, epoch_end, save_filepath_train, save_filepath_val, data_dict,
+                        num_aux_tokens, save_end_epoch=True, print_every_iterations=100, reset_global_step=False,
+                        reset_value=0):
+        if not save_end_epoch: print(f"save_end_epoch is False, the model's parameters will never be saved!")
+
+        #print("\n\n\nbefore update:", self.optimizer.iterations.numpy(), "\n\n\n")
+        if reset_global_step:
+            if self.strategy is not None:
+                with self.strategy.scope():
+                    self.optimizer.iterations = tf.Variable(reset_value, trainable=False)
+            else:
+                self.optimizer.iterations = tf.Variable(reset_value, trainable=False)
+        print("\n\n\nafter update:", self.optimizer.iterations.numpy(), "\n\n\n")
+
+        for e in range(epoch_start, epoch_end):
+
+            start = time.time()
+            self.train_epoch = e # for self.train_cutoff.
+
+            batch = 0
+            epoch_loss_total = 0
+            epoch_size_total = 0
+
+            for (input_string, input_id, label_id, aux_label, aoint_indices, sample_weights) in data_dict["train"]:
+
+                batch += 1
+
+                if batch == 2 and e == epoch_start:
+                    print("NeMoT")
+                    print(self.model.summary())
+                    print(f"Note: some parameters shown in the summary are not used, but are included in the total "
+                          f"number of parameters. Be wary of such")
+                    #print()
+                    #print("NMDecoder")
+                    #print(self.model.nm_set.summary()) # need to change NMDecoder from tf.keras.layers.Layer to tf.keras.Model for it to work.
+                    # note that our model has some parameters initialised that are not used during training, but show up in the summary and contribute to the number of parameters, these are excluded in the thesis's reporting of the number of paramters.
+
+                loss_dec, size_dec = self._distributed_train_step_MQA_RS_noMC(input_string, input_id, label_id,
+                                                                              aux_label, aoint_indices, sample_weights,
+                                                                              num_aux_tokens)
+                if size_dec == 0:
+                    print(f"The size is zero for the currenet batch, skipping to next batch!")
+                    continue
+
+                epoch_loss_total += loss_dec
+                epoch_size_total += size_dec
+
+                loss_ = loss_dec / size_dec
+                loss_ = tf.cast(loss_, dtype=tf.dtypes.float32)
+
+                if batch % print_every_iterations == 0:
+                    print(f'Batch: {batch} Epoch: {e + 1} Loss: {loss_:.4f}')
+
+                header = True if (batch == 1 and e == 0) else False
+                self._save_batch_loss_only("train", e+1, batch, save_filepath_train, header, loss_)
+
+            total_loss = epoch_loss_total / epoch_size_total
+
+            header_ = True if e == 0 else False
+            self._save_epoch_loss_only("train", e+1, save_filepath_train, header_, total_loss)
+
+            print(f'Epoch: {e+1} Loss: {total_loss:.4f}')
+            print(f'Time taken for epoch {e+1}: {time.time() - start:.2f} secs\n')
+
+            if save_end_epoch:
+                ckpt_save_path = self.ckpt_manager.save()
+                print(f'Saving checkpoint for epoch {e+1} at {ckpt_save_path}')
+
+            if "val" in data_dict.keys():
+                print(f"Running through the validation set now!")
+                self.run_validation_MQA_RS_noMC(e, save_filepath_val, data_dict["val"], num_aux_tokens)  # note e+1 is not correct.
 
     def train_step_MQA(self, input_string, input_id, label_id, aux_label,
                        aoint_indices, sample_weights, num_aux_tokens):
-        #TODO add support for aoint_indices
         # look ahead padding is handled by huggingface gpt2 model.
         gpt_pad_mask = create_padding_mask_gpt(input_id,
                                                padding_id=self.padding_id)  # the model will handel whether or not to use this mask.
@@ -851,7 +1057,8 @@ class FineTuningClass:
                                                    vanilla_set_aux_loss_bool=False,
                                                    stop_gradient=self.stop_gradient,
                                                    fixed_output=self.fixed_output, pad_tok_id=self.padding_id,
-                                                   end_tok_id=self.end_tok_id, gen_len_max=1)
+                                                   end_tok_id=self.end_tok_id, gen_len_max=1,
+                                                   reading_strategy_strategy=self.reading_strategy_strategy)
 
         convert_byte_to_string = lambda i: i.decode("utf-8")
         correct_ao = [convert_byte_to_string(x) for x in
@@ -1319,6 +1526,53 @@ class FineTuningClass:
         return f1_score, em_score, rouge_l_score_f, accuracy_score, \
                f1_score_count, em_score_count, rouge_l_score_f_count, accuracy_count
 
+    def test_LM(self, input_id, tar_id, sliding_window_misc, num_aux_toks):
+
+        gpt_pad_mask = create_padding_mask_gpt(input_id,
+                                               padding_id=self.padding_id)  # the model will handel whether or not to use this mask.
+        mask = create_combined_mask(input_id, padding_id=self.padding_id,
+                                    num_aux_tok=num_aux_toks)  # no look ahead padding for the num_aux_tokens auxiliary tokens.
+
+        loss, size = 0, 0
+        with tf.GradientTape() as tape:
+            _, _, task_prediction, _, _ = self.model(None, input_id, training=False,
+                                                      mask=mask,
+                                                      gpt_pad_mask=gpt_pad_mask,
+                                                      reading_strat_mc_bool=False,
+                                                      vanilla_set_aux_loss_bool=False,
+                                                      fixed_output=self.fixed_output,
+                                                      stop_gradient=self.stop_gradient,
+                                                      reading_strategy_strategy=None)
+            # ret (vanilla_set_output, nm_decoder_mc, task_prediction, gating_weights, attention_weights)
+            # vanilla_set_output is after it has been passed through dense layer if vanilla_set_aux_loss_bool is True
+
+            loss_ = None
+            loss, size = self.loss_function(tar_id, task_prediction, self.loss_object, self.padding_id,
+                                            self.window_size, sliding_window_misc, domask2=True)
+            # real, pred, loss_object, padding_id, window_size, isStart, domask2=False
+        loss = tf.convert_to_tensor([loss], dtype=tf.dtypes.float32)
+        size = tf.convert_to_tensor([size], dtype=tf.dtypes.float32)
+
+        return loss, size
+
+    def _distributed_test_LM(self, input_id, tar_id, sliding_window_misc, num_aux_toks):
+
+        loss, size = None, None
+        if self.strategy is not None:
+            loss, size = self.strategy.run(self.test_LM, args=(input_id, tar_id, sliding_window_misc, num_aux_toks,))
+
+            # The if else may be totally irrelevant.
+            if self.strategy.num_replicas_in_sync > 1:
+                loss = tf.reduce_sum(loss.values)
+                size = tf.reduce_sum(size.values)
+            else:
+                loss = tf.reduce_sum(loss)
+                size = tf.reduce_sum(size)
+        else:
+            loss, size = self.test_LM(input_id, tar_id, sliding_window_misc, num_aux_toks)
+
+        return loss, size
+
     def get_test_results(self, e, save_filepath, data, num_aux_tokens, max_generate_len=100,
                          filename_prefix="test", metrics=[], mode=None, multiple_answers=False):
         # multiple_answers -> some datasets have multiple answers, this boolean value indicates this so the code
@@ -1416,9 +1670,39 @@ class FineTuningClass:
             self._save_epoch_GQA(filename_prefix, e+1, save_filepath, header, macro_f1_score, avg_em_score,
                                  avg_rouge_l_score, avg_accuracy, f1_score, em_score, rouge_l_score_f, accuracy_score, f1_score_count,
                                  em_score_count, rouge_l_score_f_count, accuracy_count)
+        elif mode == "language_modelling":
+            start = time.time()
+            epoch_loss, epoch_samples = 0, 0
+            for (input_id, tar_id, sliding_window_misc) in data:
+                # note: all_labels isn't used in the instance below.
+                loss, size = self._distributed_test_LM(input_id, tar_id, sliding_window_misc, num_aux_tokens)
 
+                epoch_loss += loss
+                epoch_samples += size
+
+            total_loss = epoch_loss / epoch_samples
+
+            dict__ = self.perplexity_bpc_function(total_loss)
+            if "perplexity" in dict__.keys():
+                perplexity = dict__["perplexity"]
+            if "bpc" in dict__.keys():
+                bpc = dict__["bpc"]
+
+            print(f'Test Loss {total_loss} Perplexity: {perplexity} Bits-per-char|byte: {bpc}')
+            print(f'Time taken: {time.time() - start:.2f} secs\n')
+
+            header = True if e == 0 else False
+            self._save_epoch_loss_perp_bpc(filename_prefix, e+1, save_filepath, header, total_loss,
+                                           perplexity, bpc)
 
     # functions for printing the results.
+
+    def _save_epoch_loss_perp_bpc(self, type_, epoch, save_filepath, header, loss, perplexity, bpc):
+        assert isinstance(type_, str) and isinstance(save_filepath, str)
+        file = save_filepath + type_ + "epoch" + ".txt"
+        with open(file, "a") as f:
+            if header: f.write("Epoch Loss Perplexity BP-C|B \n")
+            f.write(f"{epoch} {loss} {perplexity} {bpc} \n")
 
     def _save_batch_loss_only(self, type_, epoch, batch, save_filepath, header, loss):
 
@@ -1475,10 +1759,57 @@ class FineTuningClass:
                     f"\t{em_score}\t{rouge_l_score_f}\t{accuracy_score}\t{f1_score_count}" 
                     f"\t{em_score_count}\t{rouge_l_score_count}\t{accuracy_count}\n")
 
+    def perplexity_bpc_function(self, loss):
+        #perplexity = tf.math.exp(tf.reduce_mean(loss))
+        #bpc = tf.reduce_mean(loss) / tf.constant(math.log(2)) # log is the natural logarithm (i.e. to base e).
+        perplexity = tf.math.exp(loss)
+        bpc = loss/tf.constant(math.log(2))
+        return {
+            "perplexity": perplexity,
+            "bpc": bpc
+        }
+
 def loss_function(target, prediction, loss_object, padding_id):
 
     mask = tf.math.logical_not(tf.math.equal(target, padding_id))  # padding mask
     loss_ = loss_object(target, prediction) # get loss from the loss_object
     mask = tf.cast(mask, dtype=loss_.dtype) # convert the mask to the correct format.
     loss_ *= mask # apply masking to positions that correspond to a <pad> token in the target.
+    return tf.reduce_sum(loss_), tf.reduce_sum(mask)
+
+def loss_function_window_size(real, pred, loss_object, padding_id, window_size, isStart, domask2=False):
+    mask = tf.math.logical_not(tf.math.equal(real, padding_id)) # padding mask
+
+    loss_ = loss_object(real, pred)
+
+    if domask2:
+        mask2 = None
+        for i in range(mask.shape[0]): # i.e. iterate through each batch.
+            if isStart[i,0] == 1: # this means the first max_seq_len tokens of an article/document.
+                if mask2 is None:
+                    mask2 = tf.ones((1, mask.shape[1]))
+                else:
+                    mask2 = tf.concat([mask2, tf.ones((1, mask.shape[1]))], axis=0)
+            else:
+                if mask2 is None:
+                    mask2 = tf.concat([tf.zeros((1,mask.shape[1]-window_size)), tf.ones((1,window_size))], axis=-1)
+                else:
+                    z = tf.concat([tf.zeros((1, mask.shape[1]-window_size)), tf.ones((1, window_size))], axis=-1)
+                    #print(f"z.shape: {z.shape}")
+                    mask2 = tf.concat([mask2, z], axis=0)
+
+        mask = tf.cast(mask, dtype=loss_.dtype)
+        # mask2 = tf.stop_gradient(tf.cast(mask2, dtype=loss_.dtype))
+        if mask2 is not None:
+            mask = mask * mask2  # any 0 in both masks will remain a zero, otherwise the item will be a one.
+        else:
+            print("mask2 is None when it shouldn't be --> running withoug mask2!\n"
+                  "If during training on multiple GPUs then this handles 0 batch size inputs at the end of an epoch")
+
+        # if error try stop gradient?
+    else:
+        mask = tf.cast(mask, dtype=loss_.dtype)
+
+    loss_ *= mask
+
     return tf.reduce_sum(loss_), tf.reduce_sum(mask)

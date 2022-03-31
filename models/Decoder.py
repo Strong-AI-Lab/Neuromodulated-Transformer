@@ -92,10 +92,10 @@ class Decoder(tf.keras.layers.Layer):
 
         # note that the embedding is moving from here to the parent NMTransformer class... as well as the absolute pos embeddings...
 
-        self.W1 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
-        self.W2 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
-        self.W3 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
-        self.W4 = tf.keras.layers.Dense(d_model, input_shape=(d_model*2,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # input is d_model*2, just noting.
+        #self.W1 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
+        #self.W2 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
+        #self.W3 = tf.keras.layers.Dense(d_model, input_shape=(d_model,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # linear projection.
+        #self.W4 = tf.keras.layers.Dense(d_model, input_shape=(d_model*2,), kernel_regularizer=tf.keras.regularizers.L2(0.01)) # input is d_model*2, just noting.
 
         self.decoder_layers = [DecoderLayer(d_model, num_heads, dff, mask_strategy, rate=rate) for _ in range(num_layers)]
         self.dropout = tf.keras.layers.Dropout(rate, input_shape=(d_model,))

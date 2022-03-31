@@ -36,12 +36,12 @@ from load_datasets.question_answering.NarrativeQA import NarrativeQADataLoader
 
 if __name__ == "__main__":
 
-    config = V4ConfigMediumSize(strategy="MirroredStrategy", batch_size=1*GPUS_AVAILABLE,
+    config = V4ConfigMediumSize(strategy="MirroredStrategy", batch_size=2*GPUS_AVAILABLE,
                                 loss_object=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False, reduction='none'),
                                 #learning_rate=tf.keras.optimizers.schedules.CosineDecay(0.0001, decay_steps=1000000),
                                 #learning_rate=0.00001,
                                 learning_rate=CosineDecayLW(start_lr=0.00005, lower_bound_lr=0.00001,
-                                                            upper_bound_lr=0.0001, warmup_steps=2000, decay_steps=(4000*4)*20),
+                                                            upper_bound_lr=0.0001, warmup_steps=2000, decay_steps=8500*20),
                                 vocab_filepath="/data/kkno604/Neuromodulated-Transformer/vocabulary/vocab1.txt",
                                 gpt2_117=True,
                                 tokenizer="gpt2")
@@ -49,9 +49,9 @@ if __name__ == "__main__":
     #strategy = None
 
     ### Override default sequence length 1300
-    config.max_seq_len_dec = 1300
-    config.max_seq_len_nm = config.max_seq_len_dec + config.num_aux_toks
-    config.max_position_encoding = config.max_seq_len_nm
+    #config.max_seq_len_dec = 1300
+    #config.max_seq_len_nm = config.max_seq_len_dec + config.num_aux_toks
+    #config.max_position_encoding = config.max_seq_len_nm
 
     transformer, optimizer = None, None
     if strategy is not None:
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     train_class = FineTuningClass(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
                                   checkpoint_path_recent="/data/kkno604/Specific-fine-tuning-baseline/NarrativeQA/Checkpoints/",
                                   strategy=strategy, pad_token="<pad>", end_tok="</s>",
-                                  recent_to_keep=20, load_recent=False,
+                                  recent_to_keep=20, load_recent=True,
                                   load_specific_path="",
                                   enc_tok="<enc>", dec_tok="<dec>",
                                   output_layer_name=None, fixed_output=False, stop_gradient=False,
@@ -100,9 +100,9 @@ if __name__ == "__main__":
                                   lm_aux_loss_global=True, train_cutoff=0,
                                   train_vanilla_set_only_on_task=False, gpt_baseline=True)
 
-    train_class.train_batch_GQA(epoch_start=0, epoch_end=20,
+    train_class.train_batch_GQA(epoch_start=16, epoch_end=20,
                                 save_filepath_train="/data/kkno604/Specific-fine-tuning-baseline/NarrativeQA/Results/",
                                 save_filepath_val="/data/kkno604/Specific-fine-tuning-baseline/NarrativeQA/Results/",
                                 data_dict=data_dict, num_aux_tokens=config.num_aux_toks,
-                                save_end_epoch=False, print_every_iterations=100, reset_global_step=False,
-                                reset_value=0)
+                                save_end_epoch=True, print_every_iterations=100, reset_global_step=True,
+                                reset_value=8187*16)

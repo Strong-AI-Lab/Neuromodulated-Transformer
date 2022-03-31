@@ -770,6 +770,61 @@ class MCTestDataLoader:
                       sample_weights, self.dec_tok_id, self.mqa_tok_id
             yield None, None, None, None, None, None, None, None
 
+        if mode == "train_hide_label":
+            for dict_ in self.train_data:
+
+                question = dict_["question"] # str: question
+                #answer_options = dict_["question"]["choices"] # list of dictionaries.
+                answer = self._map_latin_to_int_helper(dict_["correct_a"])
+
+                ques = self.p1 + " " + dict_["passage"] + " " + self.question + " " + question + " "
+                all_answer_options = ''
+                for i, ans in enumerate(["a1","a2","a3","a4"]):
+                    all_answer_options += self._map_latin_to_int_helper(str(i+1)) + " " + dict_[ans] + " "
+
+                ques += all_answer_options + " " + self.sep_tok
+
+                #answer += " " + self.end_tok # don't need the end token in this mode.
+
+                data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(ques, max_seq_len=10000000)  # [0] is ids [1] is string version...
+                label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(self.pad_tok, max_seq_len=1000000)
+                label_data_id_string_answer = self.tokenizer.encode_single_id_string_max_seq_len(answer, max_seq_len=1000000)
+
+                if len(data_id_string[1] + label_data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
+                    # note: if >= above, then case when they are equal causes the first element to be doubled twice...
+                    # > is ok as the first element will never be reached, hence ok to add back in as done below.
+                    input_string = [data_id_string[1][0]] + (data_id_string[1] + label_data_id_string[1])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                else:
+                    input_string = data_id_string[1] + label_data_id_string[1]
+
+                if len(data_id_string[0] + label_data_id_string[0]) > self.seq_len:  # handles overflow.
+                    input_id = [data_id_string[0][0]] + (data_id_string[0] + label_data_id_string[0])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                else:
+                    input_id = data_id_string[0] + label_data_id_string[0]
+                # print(f"Length of input_id: {len(input_id)}")
+
+                label_ = [self.pad_tok_id for i in range(len(input_id) - len(label_data_id_string_answer[0]) - 1)] + \
+                         label_data_id_string_answer[0] + [self.pad_tok_id] # note -1 in the range is becuase we include answer in the input_id, otherwise it would be zero.
+
+                assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
+                                                     f"of the input id ({len(input_id)})"
+
+                sample_weights = [1]  # A placeholder for if it is needed layer on...
+                #aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
+                aux_label = input_id[1:-1] + [self.pad_tok_id, self.pad_tok_id] #:-1 b/c don't want answer in auxiliary loss and it is included in input_id and input_string --- unlike the code in RACE which doesn't included it, hence, why it is different.
+                # [pad_tok_id (<sep> token pred/output is None), pad_tok_id ((1) pred/output pred is None)]
+                assert len(aux_label) == len(input_id)
+
+                start_index = data_id_string[0].index(self.a1_tok_id)  # there is only one match, so .index is sufficient.
+                end_index = len(data_id_string[0]) - 1  # this doesn't include the correct answer option and does not include <sep> token at the end.
+
+                #print(f"input_string: {input_string}\ninput_id: {input_id}\t{len(input_id)}\nlabel: {label_}\t{len(label_)}\naux_label: "
+                #      f"{aux_label}\t{len(aux_label)}")
+
+                yield input_string, input_id, label_, aux_label, [start_index, end_index], \
+                      sample_weights, self.dec_tok_id, self.mqa_tok_id
+            yield None, None, None, None, None, None, None, None
+
         if mode == "val_label" or mode == "valid_label":
             for dict_ in self.val_data:
 
@@ -804,6 +859,61 @@ class MCTestDataLoader:
 
                 label_ = [self.pad_tok_id for i in range(len(input_id) - len(label_data_id_string[0]) - 1)] + \
                          label_data_id_string[0] + [self.pad_tok_id] # note -1 in the range is becuase we include answer in the input_id, otherwise it would be zero.
+
+                assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
+                                                     f"of the input id ({len(input_id)})"
+
+                sample_weights = [1]  # A placeholder for if it is needed layer on...
+                #aux_label = input_id[1:] + [label_[-1]]  # auxiliary loss. note: [self.pad_tok_id] is label_[-1]
+                aux_label = input_id[1:-1] + [self.pad_tok_id, self.pad_tok_id] #:-1 b/c don't want answer in auxiliary loss and it is included in input_id and input_string --- unlike the code in RACE which doesn't included it, hence, why it is different.
+                # [pad_tok_id (<sep> token pred/output is None), pad_tok_id ((1) pred/output pred is None)]
+                assert len(aux_label) == len(input_id)
+
+                start_index = data_id_string[0].index(self.a1_tok_id)  # there is only one match, so .index is sufficient.
+                end_index = len(data_id_string[0]) - 1  # this doesn't include the correct answer option and does not include <sep> token at the end.
+
+                #print(f"input_string: {input_string}\ninput_id: {input_id}\t{len(input_id)}\nlabel: {label_}\t{len(label_)}\naux_label: "
+                #      f"{aux_label}\t{len(aux_label)}")
+
+                yield input_string, input_id, label_, aux_label, [start_index, end_index], \
+                      sample_weights, self.dec_tok_id, self.mqa_tok_id
+            yield None, None, None, None, None, None, None, None
+
+        if mode == "val_hide_label" or mode == "valid_hide_label":
+            for dict_ in self.val_data:
+
+                question = dict_["question"] # str: question
+                #answer_options = dict_["question"]["choices"] # list of dictionaries.
+                answer = self._map_latin_to_int_helper(dict_["correct_a"])
+
+                ques = self.p1 + " " + dict_["passage"] + " " + self.question + " " + question + " "
+                all_answer_options = ''
+                for i, ans in enumerate(["a1","a2","a3","a4"]):
+                    all_answer_options += self._map_latin_to_int_helper(str(i+1)) + " " + dict_[ans] + " "
+
+                ques += all_answer_options + " " + self.sep_tok
+
+                #answer += " " + self.end_tok # don't need the end token in this mode.
+
+                data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(ques, max_seq_len=10000000)  # [0] is ids [1] is string version...
+                label_data_id_string = self.tokenizer.encode_single_id_string_max_seq_len(self.pad_tok, max_seq_len=1000000)
+                label_data_id_string_answer = self.tokenizer.encode_single_id_string_max_seq_len(answer, max_seq_len=1000000)
+
+                if len(data_id_string[1] + label_data_id_string[1]) > self.seq_len:  # handles if there is overflow. compress some of the passage.
+                    # note: if >= above, then case when they are equal causes the first element to be doubled twice...
+                    # > is ok as the first element will never be reached, hence ok to add back in as done below.
+                    input_string = [data_id_string[1][0]] + (data_id_string[1] + label_data_id_string[1])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                else:
+                    input_string = data_id_string[1] + label_data_id_string[1]
+
+                if len(data_id_string[0] + label_data_id_string[0]) > self.seq_len:  # handles overflow.
+                    input_id = [data_id_string[0][0]] + (data_id_string[0] + label_data_id_string[0])[-(self.seq_len - 1):]  # if overflow then remove parts of the passage
+                else:
+                    input_id = data_id_string[0] + label_data_id_string[0]
+                # print(f"Length of input_id: {len(input_id)}")
+
+                label_ = [self.pad_tok_id for i in range(len(input_id) - len(label_data_id_string_answer[0]) - 1)] + \
+                         label_data_id_string_answer[0] + [self.pad_tok_id] # note -1 in the range is becuase we include answer in the input_id, otherwise it would be zero.
 
                 assert len(label_) == len(input_id), f"The length of the label ({len(label_)} doesn't match the length " \
                                                      f"of the input id ({len(input_id)})"
