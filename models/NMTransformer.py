@@ -282,7 +282,7 @@ class NMTransformer(tf.keras.Model):
         elif reading_strategy_strategy == "summarization_only": # training on MQA, and possibly some summarization examples.
             pass #TODO
         elif reading_strategy_strategy == "aoint_and_highlighting":
-            task_prediction, _, _, _ = self.run_aoint_and_highlighting(id_inp, training, mask, gpt_pad_mask,
+            return self.run_aoint_and_highlighting(id_inp, training, mask, gpt_pad_mask,
                                                                        fixed_output,
                                                                        stop_gradient, reading_strategy_strategy)
         else:

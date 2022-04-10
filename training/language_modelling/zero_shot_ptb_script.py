@@ -3,7 +3,7 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 GPUS_AVAILABLE = 1
 
 import sys
@@ -80,8 +80,8 @@ if __name__ == "__main__":
     #print("\n\n\nbefore training:", optimizer.iterations.numpy(), "\n\n\n")
     #filepath = "/large_data/wikitext-103/wiki.test.tokens"
     filepath = "/large_data/PTB/ptb.test.txt"
-    #sliding_window = config.max_seq_len_dec
-    sliding_window = 32
+    sliding_window = config.max_seq_len_dec
+    #sliding_window = 32
 
     config = V4ConfigMediumSize(strategy=None, batch_size=2, loss_object=None, learning_rate=None, gpt2_117=True,
                                 tokenizer="gpt2",
@@ -201,7 +201,7 @@ if __name__ == "__main__":
                                   strategy=strategy, pad_token="<pad>", end_tok = "</s>",
                                   recent_to_keep=20, load_recent=False,
                                   #load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/pretrain-C4-v4-gpt2/ckpt-48",
-                                  load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/gpt-2-saved-checkpoints/ckpt-200",
+                                  load_specific_path="/data/kkno604/NMTransformer_pretraining/Checkpoints/gpt-2-saved-checkpoints/ckpt-111", # 200, 183, 173, 155, 130, 111
                                   #load_specific_path="",
                                   enc_tok="<enc>", dec_tok="<dec>",
                                   output_layer_name="lm", fixed_output=True, stop_gradient=False,
@@ -213,5 +213,5 @@ if __name__ == "__main__":
     train_class.get_test_results(e=0,
                                  save_filepath="/data/kkno604/zero-shot-lm/PTB/",
                                  data=data_dict["test"], num_aux_tokens=config.num_aux_toks,
-                                 max_generate_len=1, filename_prefix="PTB-test-ckpt-200-32sw", metrics=["accuracy"],
+                                 max_generate_len=1, filename_prefix="PTB-test-ckpt-111-768sw", metrics=["accuracy"],
                                  mode="language_modelling", multiple_answers=False)

@@ -3,7 +3,7 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "4"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 GPUS_AVAILABLE = 1
 
 import sys
@@ -78,7 +78,7 @@ if __name__ == "__main__":
         optimizer = tf.keras.optimizers.Adam(config.learning_rate)
 
     filepaths = {"MCTest_test": "/large_data/MCTest/"}
-    GETVALRESULTS = True  # set to False if want to be test data.
+    GETVALRESULTS = False  # set to False if want to be test data.
 
     dloader_test = ReadingStrategyDataLoaderTF(filepaths=filepaths, seq_len=config.max_seq_len_dec,
                                                batch_size=config.batch_size, tokenizer=config.tokenizer)
@@ -94,7 +94,8 @@ if __name__ == "__main__":
     if strategy is not None:
         data_dict["test"] = strategy.experimental_distribute_dataset(data_dict["test"])
 
-    for i in range(1,21):
+    for i in [1]:
+    #for i in range(1,21):
 
         train_class = FineTuningClass(transformer, optimizer, config.loss_object, loss_function, config.tokenizer,
                                       checkpoint_path_recent="/data/kkno604/Reading_strategy_experiments/highlighting_only/MCTest/Checkpoints/",
@@ -112,7 +113,7 @@ if __name__ == "__main__":
                                       reading_strategy_strategy="aoint_and_highlighting")
 
         train_class.get_test_results(e=i-1,
-                                     save_filepath="/data/kkno604/Reading_strategy_experiments/aoint_and_highlighting/MCTest/Results/val/",
+                                     save_filepath="/data/kkno604/Reading_strategy_experiments/aoint_and_highlighting/MCTest/Results/test/",
                                      data=data_dict["test"], num_aux_tokens=config.num_aux_toks,
-                                     max_generate_len=1, filename_prefix="MCTest-val-ckpt"+str(i), metrics=["accuracy"],
+                                     max_generate_len=1, filename_prefix="MCTest-test-ckpt"+str(i), metrics=["accuracy"],
                                      mode="MQA_label_only", multiple_answers=False)

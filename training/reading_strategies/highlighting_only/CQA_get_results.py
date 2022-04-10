@@ -3,7 +3,7 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 GPUS_AVAILABLE = 1
 
 import sys
@@ -110,4 +110,4 @@ if __name__ == "__main__":
                                      save_filepath="/data/kkno604/Reading_strategy_experiments/highlighting_only/CQA/Results/val/",
                                      data=data_dict["test"], num_aux_tokens=config.num_aux_toks,
                                      max_generate_len=1, filename_prefix="CQA-val-ckpt"+str(i), metrics=["accuracy"],
-                                     mode="MQA_label_only", multiple_answers=False)
+                                     mode="MQA_label_only", multiple_answers=False) 

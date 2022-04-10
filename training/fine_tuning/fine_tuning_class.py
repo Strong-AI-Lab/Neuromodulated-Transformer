@@ -1762,6 +1762,7 @@ class FineTuningClass:
     def perplexity_bpc_function(self, loss):
         #perplexity = tf.math.exp(tf.reduce_mean(loss))
         #bpc = tf.reduce_mean(loss) / tf.constant(math.log(2)) # log is the natural logarithm (i.e. to base e).
+        # note the mean is calculated else ware.
         perplexity = tf.math.exp(loss)
         bpc = loss/tf.constant(math.log(2))
         return {

@@ -3,7 +3,7 @@ import os
 import tensorflow.python.framework.ops
 
 os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
-os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4"
 GPUS_AVAILABLE = 1
 
 import sys
@@ -117,7 +117,7 @@ if __name__ == "__main__":
                                   train_vanilla_set_only_on_task=False,
                                   reading_strategy_strategy="aoint_only")
 
-    train_class.train_batch_MQA_RS_noMC(epoch_start=15, epoch_end=20,
+    train_class.train_batch_MQA_RS_noMC(epoch_start=19, epoch_end=20,
                                 save_filepath_train="/data/kkno604/Reading_strategy_experiments/aoint_only/WG/Results/",
                                 save_filepath_val="/data/kkno604/Reading_strategy_experiments/aoint_only/WG/Results/",
                                 data_dict=data_dict, num_aux_tokens=config.num_aux_toks, save_end_epoch=True,
